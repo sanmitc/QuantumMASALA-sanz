@@ -109,5 +109,5 @@ def force_nonloc(dftcomm:DFTCommMod,
         comm.Allreduce(comm.IN_PLACE, force_nl)
         #if comm.rank==0: if dftcomm.image_comm.rank==0: print("nonlocal force before symmetrization", force_nl)  
         #if comm.rank==0: if dftcomm.image_comm.rank==0: print( "nonlocal force after symmetrization", force_nl)
-    #force_nl=crystal.symm.symmetrize_vec(force_nl)
+    force_nl=crystal.symm.symmetrize_vec(force_nl)
     return force_nl

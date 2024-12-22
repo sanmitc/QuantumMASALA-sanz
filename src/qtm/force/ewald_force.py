@@ -234,6 +234,6 @@ def force_ewald(
     Force=Force.T
     #if dftcomm.image_comm.rank==0: print("The 1st columns represent atoms and the rows represent x, y, z coordinates.")
     #if dftcomm.image_comm.rank==0: print("the ewald forces before symmetrization", Force)
-    #Force = crystal.symm.symmetrize_vec(Force)
+    Force = crystal.symm.symmetrize_vec(Force)
     #if dftcomm.image_comm.rank==0: print("the ewald forces after symmetrization", Force)
     return Force

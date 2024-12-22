@@ -405,7 +405,7 @@ def scf(
                     dftcomm, ksham_, kswfn_, diago_thr, **solver_kwargs
                 )
                 if force_stress and ispin==0:
-                    vkb_dij=ksham.l_vkb_dij
+                    vkb_dij=ksham_.l_vkb_dij
                 else: vkb_dij=None 
                 numiter += niter
             numiter /= 2 if is_spin and not is_noncolin else 1

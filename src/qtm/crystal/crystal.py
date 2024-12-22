@@ -132,7 +132,7 @@ class CrystalSymm:
 
     def __init__(self, crystal: Crystal):
         assert isinstance(crystal, Crystal)
-
+        self.crystal: Crystal = crystal
         lattice = crystal.reallat.latvec.T
         positions = [sp.r_cryst.T for sp in crystal.l_atoms]
         numbers = np.repeat(range(len(positions)), [len(pos) for pos in positions])

@@ -125,7 +125,7 @@ out = scf(
     force_stress=True
 )
 
-scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc = out
+scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute= out
 
 
 
@@ -158,7 +158,8 @@ start_time = time.time()
 force_nloc=force_nonloc(dftcomm=dftcomm,
                           numbnd=numbnd,
                           wavefun=l_wfn_kgrp, 
-                          crystal=crystal)
+                          crystal=crystal,
+                          nloc_dij_vkb=nloc)
 
 if dftcomm.image_comm.rank==0:
     print("force non local", force_nloc)
@@ -170,9 +171,10 @@ force_total, force_norm=force(dftcomm=dftcomm,
                             numbnd=numbnd,
                             wavefun=l_wfn_kgrp,
                             crystal=crystal,
-                            ecutwfn=ecut_wfn,
                             gspc=gwfn, 
                             rho=rho,
+                            vloc=v_loc,
+                            nloc_dij_vkb=nloc,
                             gamma_only=False,
                             verbosity=True)
 

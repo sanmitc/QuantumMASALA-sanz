@@ -55,6 +55,6 @@ def force_local(dftcomm: DFTCommMod,
     force_local=vrho@cart_g.T*omega*fact
     #if dftcomm.image_comm.rank==0: print("time taken to calculate the force through matrix multiplications", perf_counter()-start_time)
     #start_time=perf_counter()
-    #force_local=cryst.symm.symmetrize_vec(force_local)
+    force_local=cryst.symm.symmetrize_vec(force_local)
     #if dftcomm.image_comm.rank==0: print("time taken to symmetrize the force", perf_counter()-start_time)
     return force_local

@@ -97,7 +97,7 @@ def force(dftcomm: DFTCommMod,
         delF/=del_R_norm2[:,np.newaxis]
         print("delF after division", delF)
         force_total-=delF
-    
+    ##Symmetrize the force
     force_total_norm=np.sqrt(np.sum(force_total**2))
     return force_total, force_total_norm
 
