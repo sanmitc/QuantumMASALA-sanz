@@ -9,14 +9,13 @@ from qtm.gspace import GSpace
 from qtm.containers import get_FieldG, FieldGType
 from .upf import UPFv2Data
 
-from qtm.constants import PI
+from qtm.constants import PI, RYDBERG, ELECTRON_RYD
 
 from qtm.config import NDArray
 from qtm.msg_format import type_mismatch_msg
 from qtm.logger import qtmlogger
 
 EPS6 = 1e-6
-
 
 # def _simpson(f_r: NDArray, r_ab: NDArray):
 #     f_times_dr = f_r * r_ab
@@ -43,7 +42,6 @@ def _simpson_old(f, rab):
         + f_r[start + 2 : stop + 2 : step]
     )
 
-
 def _sph2pw(r: NDArray, r_ab: NDArray, f_times_r2: NDArray, g: NDArray):  # type: ignore
     numg = g.shape[0]
     f_g = np.empty((*f_times_r2.shape[:-1], numg), dtype="c16", like=f_times_r2)
@@ -64,6 +62,26 @@ def _sph2pw(r: NDArray, r_ab: NDArray, f_times_r2: NDArray, g: NDArray):  # type
         )
     return f_g
 
+def _dsph2pw(r: NDArray, r_ab: NDArray, f_times_r2: NDArray, g: NDArray):
+    numg = g.shape[0]
+    f_g = np.empty((*f_times_r2.shape[:-1], numg), dtype='c16')
+    numr = r.shape[0]
+
+    def dspherical(g,r):
+        return np.cos(g*r)/g - np.sin(g*r)/(g**2*r)
+
+    r_ab = r_ab.copy()
+    r_ab *= 1. / 3
+    r_ab[1:-1:2] *= 4
+    r_ab[2:-1:2] *= 2
+    f_g[:] = dspherical(g, r[1]) * f_times_r2[..., 1] * r_ab[1]
+    g = g.reshape(-1, 1)
+    f_times_r2 = np.expand_dims(f_times_r2, axis=-2)
+    for idxr in range(2, numr):
+        f_g[:] += np.sum(dspherical(g, r[idxr])
+                         * f_times_r2[..., idxr] * r_ab[idxr],
+                   axis=-1)
+    return f_g
 
 def _check_args(sp: BasisAtoms, grho: GSpace):
     if sp.ppdata is None:
@@ -198,7 +216,48 @@ def loc_generate_pot_rhocore(sp: BasisAtoms, grho: GSpace) -> (FieldGType, Field
         rho_core.data[:] = 0
 
     N = np.prod(grho.grid_shape)
-    v_ion *= _4pibv * N * struct_fac
-    rho_core *= _4pibv * N * struct_fac
+    v_ion *= _4pibv 
+    rho_core *= _4pibv 
 
-    return v_ion, rho_core
+    v_ion_mult = v_ion*struct_fac*N
+    rho_core_mult = rho_core*struct_fac*N
+
+    return v_ion_mult, rho_core_mult, v_ion, rho_core
+
+
+def loc_generate_dpot(sp: BasisAtoms, grho: GSpace) -> FieldGType:
+    _check_args(sp, grho)
+
+    upfdata: UPFv2Data = sp.ppdata
+    if upfdata.core_correction:
+        raise NotImplementedError("core correction is not implemented yet")
+    # Radial Mesh specified in Pseudopotential Data
+    r = upfdata.r
+    r_ab = upfdata.r_ab
+
+    # Setting constants and aliases
+    cellvol = grho.reallat_cellvol
+    _4pibv = 4 * np.pi / cellvol
+    _1bv = 1 / cellvol
+
+    g_norm2 = grho.g_norm2[grho.idxsort]
+    g_norm=grho.g_norm[grho.idxsort]
+    FieldG: type[FieldGType] = get_FieldG(grho)
+
+    valence = upfdata.z_valence
+
+    vloc = upfdata.vloc
+    dv_ion = FieldG.empty(None)
+
+    f_times_r2 = np.empty((1, len(r)), dtype='f8')
+    f_times_r2[0] = (vloc * r + valence* erf(r))*r
+    f_times_r2[0]/=RYDBERG
+
+    f_g = _dsph2pw(r, r_ab, f_times_r2, g_norm)
+    with np.errstate(divide='ignore'):
+        dv_ion.data[:] = 0.5*f_g[0]/g_norm + valence * ELECTRON_RYD**2 * np.exp(-g_norm2 / 4) * (1+g_norm2/4)/ g_norm2**2
+    if grho.has_g0:
+        dv_ion.data[0] = 0
+
+    dv_ion.data[:]*=_4pibv
+    return dv_ion

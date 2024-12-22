@@ -160,7 +160,7 @@ def compute(
 
         for key, val in xc_inp.items():
             xc_inp[key] = val.get() if isinstance(val, cp.ndarray) else val
-
+    xc_GGA_stress=0
     for xcfunc in [exch_func, corr_func]:
         xcfunc_out = xcfunc.compute(xc_inp)
         for key in xcfunc_out:
@@ -183,6 +183,11 @@ def compute(
                 h_r[1] = 2 * vsig_r[2] * grad_rho_r[1] + vsig_r[1] * grad_rho_r[0]
             div_h = fieldg_div(h_r.to_g()).to_r()
 
+            grad_rho_r_T=grad_rho_r[0]._data.T
+            grad_rho_tensor=np.einsum("ij, ik->ijk", grad_rho_r_T, grad_rho_r_T)
+            grad_rho_tensor*=vsig_r[0]._data.reshape(-1,1,1)
+            xc_GGA_stress+=np.sum(grad_rho_tensor, axis=0)
+
             v_xc -= div_h
 
-    return v_xc, en_xc.real
+    return v_xc, en_xc.real, xc_GGA_stress
