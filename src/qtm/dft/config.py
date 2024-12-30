@@ -11,7 +11,6 @@ from qtm.logger import qtmlogger
 from qtm.mpi.comm import QTMComm, split_comm_pwgrp
 from qtm.msg_format import *
 
-
 class DFTCommMod:
     def __init__(
         self, image_comm: QTMComm, n_kgrp: int | None = None, pwgrp_size: int = 1
@@ -31,9 +30,7 @@ class DFTCommMod:
         Raises:
             ValueError: If 'n_kgrp' does not evenly divide the number of 'pwgrp' subgroups.
         """
-
         self.image_comm = image_comm
-
         if MPI4PY_INSTALLED:
             pwgrp_intra, pwgrp_inter = split_comm_pwgrp(self.image_comm, pwgrp_size)
             self.n_pwgrp = pwgrp_inter.size
