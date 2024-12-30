@@ -336,7 +336,6 @@ class DistGSpaceBase(GSpaceBase):
 
 class DistGSpace(DistGSpaceBase, GSpace):
     gspc_glob: GSpace
-
     def __init__(self, comm: QTMComm, gspc: GSpace):
         DistGSpaceBase.__init__(self, comm, gspc)
         self.ecut = self.gspc_glob.ecut
@@ -350,20 +349,16 @@ class DistGkSpace(DistGSpaceBase, GkSpace):
             raise TypeError(
                 f"'gkspc' must be a '{GkSpace}' instance. " f"got '{type(gkspc)}'."
             )
-
         DistGSpaceBase.__init__(self, comm, gkspc)
         self.gkspc_glob = self.gspc_glob
-
         if not isinstance(gwfn, DistGSpace):
             raise TypeError()
         if gwfn.gspc_glob is not gkspc.gwfn:
             raise ValueError
         self.gwfn = gwfn
-
         self.ecutwfn = self.gkspc_glob.ecutwfn
         self.k_cryst = self.gkspc_glob.k_cryst
         self.idxgk = None
-
         self.gk_cryst = self.g_cryst.copy().astype("f8")
         for ipol in range(3):
             self.gk_cryst[ipol] += self.k_cryst[ipol]

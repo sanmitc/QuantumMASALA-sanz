@@ -99,7 +99,6 @@ class DistBufferType(BufferType, ABC):
             data = self.data.reshape((*self.shape, self.numspin, -1))
         except:
             data = self.data
-
         if self.basis_type == "r":
             data_glob = self.gspc.gather_r(data, allgather)
         else:  # if self.basis_type == 'g'
@@ -161,30 +160,24 @@ def get_DistFieldG(dist_gspc: DistGSpace) -> type[FieldGType]:
 def get_DistFieldR(dist_gspc: DistGSpace) -> type[FieldRType]:
     if not isinstance(dist_gspc, DistGSpace):
         raise TypeError(type_mismatch_msg("dist_gspc", dist_gspc, DistGSpace))
-
     class DistFieldR(DistBufferType, FieldRType, gspc=dist_gspc):
         gspc: DistGSpace
         BufferType = get_FieldR(dist_gspc.gspc_glob)
-
     return DistFieldR
-
 
 @lru_cache(maxsize=None)
 def get_DistWavefunG(dist_gkspc: DistGkSpace, numspin: int) -> type[WavefunGType]:
     if not isinstance(dist_gkspc, DistGkSpace):
         raise TypeError(type_mismatch_msg("dist_gspc", dist_gkspc, DistGkSpace))
-
     class DistWavefunG(DistBufferType, WavefunGType, gkspc=dist_gkspc, numspin=numspin):
         gspc: DistGkSpace
         gkspc: DistGkSpace
         BufferType = get_WavefunG(dist_gkspc.gkspc_glob, numspin)
-
         def vdot(self, ket: WavefunGType) -> NDArray:
             out = super().vdot(ket)
             comm = self.gkspc.pwgrp_comm
             comm.Allreduce(comm.IN_PLACE, out, comm.SUM)
             return out
-
     return DistWavefunG
 
 
