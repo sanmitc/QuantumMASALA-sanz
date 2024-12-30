@@ -33,6 +33,10 @@ def force_local(dftcomm: DFTCommMod,
     idxsort = gspc.idxsort
     numg = gspc.size_g
     cart_g = gspc.g_cart[:,idxsort]
+    if cart_g.ndim==3:
+        cart_g=cart_g.reshape(cart_g.shape[0],cart_g.shape[-1])
+    print("coords_cart_all_shape", coords_cart_all.shape)
+    print("cart_g_shape", cart_g.shape)
     gtau = coords_cart_all.T @ cart_g
     omega=gspc.reallat_cellvol
     #if dftcomm.image_comm.rank==0: print('Time to setup the crystal and g-space', perf_counter()-start_time)
@@ -53,8 +57,9 @@ def force_local(dftcomm: DFTCommMod,
     #if dftcomm.image_comm.rank==0: print("time taken to calculate the vrho", perf_counter()-start_time)
     #start_time=perf_counter()
     force_local=vrho@cart_g.T*omega*fact
+    print("force_local", force_local)   
     #if dftcomm.image_comm.rank==0: print("time taken to calculate the force through matrix multiplications", perf_counter()-start_time)
     #start_time=perf_counter()
-    force_local=cryst.symm.symmetrize_vec(force_local)
+    force_local=cryst.symm.symmetrize_vec(force_local[0] if cart_g.ndim==3 else force_local)
     #if dftcomm.image_comm.rank==0: print("time taken to symmetrize the force", perf_counter()-start_time)
     return force_local
