@@ -12,7 +12,7 @@ from qtm.mpi.gspace import DistGSpace, DistGkSpace
 if TYPE_CHECKING:
     from typing import Literal
     from numbers import Number
-__all__ = ["scf", "EnergyData", "IterPrinter"]
+__all__ = ["scf", "EnergyData", "Iterprinter"]
 
 from dataclasses import dataclass
 from time import perf_counter
@@ -61,7 +61,7 @@ from qtm.io_utils.dft_printers import print_scf_parameters
 if version_info[1] >= 8:
     from typing import Protocol
 
-    class IterPrinter(Protocol):
+    class Iterprinter(Protocol):
         def __call__(
             self,
             idxiter: int,
@@ -77,7 +77,7 @@ if version_info[1] >= 8:
         def __call__(self, ik: int, kswfn: list[KSWfn]) -> None: ...
 
 else:
-    IterPrinter = "IterPrinter"
+    Iterprinter = "Iterprinter"
     WfnInit = "WfnInit"
 #endregion
 
@@ -102,8 +102,8 @@ def scf(
     conv_thr: float = 1e-6 * RYDBERG,
     maxiter: int = 100,
     diago_thr_init: float = 1e-5 * RYDBERG,
-    iter_printer: IterPrinter | None = None,
-    mix_beta: float = 0.7,
+    iter_printer: Iterprinter | None = None,
+    mix_beta: float = 0.3,
     mix_dim: int = 8,
     dftconfig: DFTConfig | None = None,
     ret_vxc: bool = False,
@@ -237,7 +237,7 @@ def scf(
     kroot_intra = dftcomm.kroot_intra
     #endregion
 
-    print("Starting SCF calculation", flush=True)
+    #print("Starting SCF calculation", flush=True)
 
     #region Checking the number of k-points and k-groups
     assert (
@@ -245,7 +245,7 @@ def scf(
     ), "Number of k-points must be greater than or equal to the number of k-groups"
     #endregion
 
-    #region Printing the SCF parameters
+    #region #printing the SCF parameters
     if dftcomm.image_comm.rank == 0:
         print_scf_parameters(
             dftcomm,
@@ -274,7 +274,7 @@ def scf(
         )
     #endregion
 
-    print("printed scf parameters", flush=True)   
+    #print("#printed scf parameters", flush=True)   
     #region the main definitions across all the processors will start here
     with image_comm:
         #region defining the parallelization groups
@@ -302,7 +302,7 @@ def scf(
         l_kswfn_kgrp = []
         l_ksham_kgrp = []
 
-        print("initialized wavefunction container", flush=True)
+        #print("initialized wavefunction container", flush=True)
 
         #region creatng the g space, gk space, kswfn and ksham containers
 
@@ -339,7 +339,7 @@ def scf(
 
         #endregion
 
-        print("initialized gk and g space and ksham wavefunction", flush=True)
+        #print("initialized gk and g space and ksham wavefunction", flush=True)
 
         #region defining g space for g space parallelzation
         if is_gwfn_dist:
@@ -364,7 +364,7 @@ def scf(
 
         #endregion  
 
-        print("initialized v_ion and rho_core", flush=True)
+        #print("initialized v_ion and rho_core", flush=True)
 
         #region defining the energy data
         en = EnergyData()
@@ -382,12 +382,12 @@ def scf(
         #endregion
         
 
-        print("initialized energy data", flush=True)
+        #print("initialized energy data", flush=True)
 
         #region SCF iteration input and output charge densities
         rho_in, rho_out = rho_start, FieldG_rho.empty(1 + is_spin)
         #endregion
-        print("initialized rho_in and rho_out", flush=True)
+        #print("initialized rho_in and rho_out", flush=True)
 
         #region Defining local potential calculation subroutine
         v_hart: FieldRType
@@ -432,7 +432,7 @@ def scf(
             return v_hxc_g
         #endregion
         
-        print("initialized vloc", flush=True)
+        #print("initialized vloc", flush=True)
 
         #region Defining KS Hamiltonian solver routines
         if dftconfig.eigsolve_method == "davidson":
@@ -454,7 +454,7 @@ def scf(
             }
         #endregion
         
-        print("initialized solver", flush=True)
+        #print("initialized solver", flush=True)
 
         #region Defining the subroutine to solve the Kohn-Sham wavefunctions
         def solve_kswfn(kswfn_k: list[KSWfn], ksham_k: list[KSHam],
@@ -486,7 +486,7 @@ def scf(
             return numiter, vkb_dij
         #endregion
         
-        print("initialized solve_kswfn", flush=True)
+        #print("initialized solve_kswfn", flush=True)
 
         #region Generating rho from l_kswfn_kgrp
         def update_rho_out():
@@ -513,7 +513,7 @@ def scf(
         #endregion
 
 
-        print("initialized update_rho_out", flush=True)
+        #print("initialized update_rho_out", flush=True)
 
         #region Defining energy calculation routine
         if is_gwfn_dist:
@@ -554,7 +554,7 @@ def scf(
                 en.internal = en.total - en.smear
         #endregion
 
-        print("initialized compute_en", flush=True)
+        #print("initialized compute_en", flush=True)
 
         #region Defining charge mixing routine
         if dftconfig.mixing_method == "modbroyden":
@@ -572,21 +572,21 @@ def scf(
         idxiter = 0
         nloc_dij_vkb=[]
 
-        print("initialized mixing routine", flush=True)
+        #print("initialized mixing routine", flush=True)
 
         #region starting the SCF loop
         while idxiter < maxiter:
-            print("scf iteration is staring, at iteration", idxiter, flush=True)
-            print(end="", flush=True)
+            #print("scf iteration is staring, at iteration", idxiter, flush=True)
+            #print(end="", flush=True)
             if symm_rho:
                 rho_in = symm_mod.symmetrize(rho_in)
             normalize_rho(rho_in)
-            print("normalized rho_in, at iteration", idxiter, flush=True)
+            #print("normalized rho_in, at iteration", idxiter, flush=True)
             compute_vloc()
-            print("computed vloc, at iteration", idxiter, flush=True)
+            #print("computed vloc, at iteration", idxiter, flush=True)
 
             vloc_g0 = np.sum(vloc, axis=-1) / np.prod(grho.grid_shape)
-            print("computed vloc_g0, at iteration", idxiter, flush=True)
+            #print("computed vloc_g0, at iteration", idxiter, flush=True)
 
             diago_avgiter = 0
             for kswfn_, ksham_ in zip(l_kswfn_kgrp, l_ksham_kgrp):
@@ -594,50 +594,52 @@ def scf(
                 if idxiter==0: nloc_dij_vkb.append(dij_vkb)
                 diago_avgiter += numiter
             diago_avgiter /= len(i_kpts_kgrp)
-            print("solved kswfn, at iteration", idxiter, flush=True)
+            #print("solved kswfn, at iteration", idxiter, flush=True)
 
             if occ_typ == "fixed":
                 en.HO_level, en.LU_level = occup.fixed.compute_occ(
                     dftcomm, l_kswfn_kgrp, crystal.numel
                 )
-                print("computed fixed occupation, at iteration", idxiter, flush=True)
-            elif occ_typ == "smear":
+                #print("computed fixed occupation, at iteration", idxiter, flush=True)
+            #print("starting smearing occupation, if needed", flush=True)  
+            if occ_typ == "smear":
+                #print("now we are going to smear the occupation", flush=True)
                 en.fermi, en.smear = occup.smear.compute_occ(
                     dftcomm, l_kswfn_kgrp, crystal.numel, is_spin, smear_typ, e_temp
                 )
-                print("computed smear occupation, at iteration", idxiter, flush=True)
+                #print("computed smear occupation, at iteration", idxiter, flush=True)
 
             update_rho_out()
-            print("updated rho_out, at iteration", idxiter, flush=True)
+            #print("updated rho_out, at iteration", idxiter, flush=True)
             compute_en()
-            print("computed energy, at iteration", idxiter, flush=True)
+            #print("computed energy, at iteration", idxiter, flush=True)
             e_error = float(mixmod.compute_error(rho_in, rho_out))
-            print("computed error, at iteration", idxiter, flush=True)
+            #print("computed error, at iteration", idxiter, flush=True)
             e_error = image_comm.bcast(e_error)
-            print("broadcasted error, at iteration", idxiter, flush=True)
+            #print("broadcasted error, at iteration", idxiter, flush=True)
 
             if (
                 e_error < conv_thr
             ):  # and diago_thr < max(1e-13, 0.1*conv_thr/crystal.numel):
-                print("e_error is less than conv_thr, at iteration", idxiter, "finishing the iteration", flush=True)
+                #print("e_error is less than conv_thr, at iteration", idxiter, "finishing the iteration", flush=True)
                 scf_converged = True
                 rho_out = rho_in.copy()
-                print("final rho_out", flush=True)
+                #print("final rho_out", flush=True)
                 compute_en()
-                print("final energy", flush=True)
+                #print("final energy", flush=True)
             elif idxiter == 0 and e_error < diago_thr * crystal.numel:
-                print("e_error is less than diago_thr, at iteration", idxiter, "finishing the iteration", flush=True)
+                #print("e_error is less than diago_thr, at iteration", idxiter, "finishing the iteration", flush=True)
                 diago_thr = 0.1 * e_error / crystal.numel
                 # continue
             else:
-                print("e_error is greater than diago_thr, at iteration", idxiter, "starting the next iteration", flush=True)
+                #print("e_error is greater than diago_thr, at iteration", idxiter, "starting the next iteration", flush=True)
                 diago_thr = min(diago_thr, 0.1 * e_error / crystal.numel)
                 diago_thr = max(diago_thr, 0.5e-13)
                 rho_in = mixmod.mix(rho_in, rho_out)
-                print("mixed rho_in and rho_out, at iteration", idxiter, flush=True)
+                #print("mixed rho_in and rho_out, at iteration", idxiter, flush=True)
                 if symm_rho:
                     rho_in = symm_mod.symmetrize(rho_in)
-                print("symmetrized rho_in, at iteration", idxiter, flush=True)
+                #print("symmetrized rho_in, at iteration", idxiter, flush=True)
 
             scf_converged = image_comm.bcast(scf_converged)
             diago_thr = image_comm.bcast(diago_thr)
@@ -654,7 +656,7 @@ def scf(
                 )
             if scf_converged:
                 if image_comm.rank == 0:
-                    print("SCF Converged.")
+                    #print("SCF Converged.")
                     if is_spin:
                         # Total magnetization = int rho_up(r)-rho_down(r) dr
                         tot_mag = rho_out[0].to_r() - rho_out[1].to_r()
