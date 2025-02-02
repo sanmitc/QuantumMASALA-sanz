@@ -7,12 +7,9 @@ from qtm.crystal import Crystal
 from qtm.gspace import GSpace
 from qtm.constants import ELECTRON_RYD, PI, RYDBERG_HART
 from qtm.dft import DFTCommMod
-import time 
+EWALD_ERR_THR = 1e-6  # TODO: In quantum masala ewald energy code it is set to 1e-7
 
-EWALD_ERR_THR = 1e-7  # TODO: In quantum masala ewald energy code it is set to 1e-7
-
-
-def rgen2(rmax: float,
+'''def rgen2(rmax: float,
          max_num: int,
          beta: float,
          latvec: np.ndarray,
@@ -28,11 +25,11 @@ def rgen2(rmax: float,
             Numpy array with dimensions (3,3)
 
     dtau:difference between atomic positions. numpy array with shape (3,)"""
-
+    file=open("rgen2.txt", "a")
     if rmax == 0:
         raise ValueError("rmax is 0, grid is non-existent.")
     # making the grid
-    n = np.floor(4 / beta / np.linalg.norm(latvec, axis=1)).astype('i8') + 2
+    n = np.floor(2 / beta / np.linalg.norm(latvec, axis=1)).astype('i8') + 2
     ni = n[0]
     nj = n[1]
     nk = n[2]
@@ -51,10 +48,10 @@ def rgen2(rmax: float,
                     vec_num += 1
                 if vec_num >= max_num:
                     raise ValueError(f"maximum allowed value of r vectors are {max_num}, got {vec_num}. ")
-    return r, r_norm
+    return r, r_norm'''
 
-def transgen(beta: float,
-         latvec: np.ndarray):
+def transgen(latvec: np.ndarray,
+         rmax: float):
     """r max: the maximum radius we take into account
 
     max_num: maximum number of r vectors
@@ -69,7 +66,7 @@ def transgen(beta: float,
 
 
     # making the grid
-    n = np.floor(4 / beta / np.linalg.norm(latvec, axis=1)).astype('i8') + 2
+    n = np.floor(1/np.linalg.norm(latvec, axis=1)*rmax).astype('i8') + 2
     ni = n[0]
     nj = n[1]
     nk = n[2]
@@ -85,9 +82,7 @@ def transgen(beta: float,
     l0_trans=l0_trans[np.newaxis, :, np.newaxis, np.newaxis, :]
     l1_trans=l1_trans[np.newaxis, np.newaxis, :, np.newaxis, :]
     l2_trans=l2_trans[np.newaxis, np.newaxis, np.newaxis, :, :]
-
     trans=np.squeeze(l0_trans+l1_trans+l2_trans).reshape(-1,3)
-    
     return trans
 
 def rgen(trans:np.ndarray,
@@ -97,16 +92,15 @@ def rgen(trans:np.ndarray,
          ):
     if rmax == 0:
         raise ValueError("rmax is 0, grid is non-existent.")
-    trans-=dtau
-    norms=np.linalg.norm(trans, axis=1)
-    mask=(norms<rmax) & (norms>1e-5)
-    r=trans[mask]
+    trans_copy=trans.copy()
+    trans_copy-=dtau
+    norms=np.linalg.norm(trans_copy, axis=1)
+    mask=(norms<rmax) & (norms**2>1e-5)
+    r=trans_copy[mask]
     r_norm=norms[mask]
     vec_num=r.shape[0]
     if vec_num >= max_num:
         raise ValueError(f"maximum allowed value of r vectors are {max_num}, got {vec_num}. ")
-    #print("r is", trans)
-    #print("the shape of r is", trans.shape)
     return r.T, r_norm, vec_num
 
 def force_ewald(
@@ -127,7 +121,6 @@ def force_ewald(
         numatom being the number of atoms in the crystal.
 
         Primvec of Gspc.recilat: The columns represent the reciprocal lattice vectors"""
-    #start_time=time.perf_counter()
     # getting the characteristic of the g_vectors:
     gcart_nonzero = gspc.g_cart[:, 1:]
     gg_nonzero = np.linalg.norm(gcart_nonzero, axis=0)**2
@@ -139,31 +132,15 @@ def force_ewald(
     omega = reallat.cellvol
 
     latvec = np.array(reallat.axes_alat)
-    #recilat = ReciLattice.from_reallat(reallat=reallat)
     valence_all = np.repeat([sp.ppdata.valence for sp in l_atoms], [sp.numatoms for sp in l_atoms])
-
-    # concatenated version of coordinate arrays where ith column represents the coordinate of ith atom.
     coords_cart_all = np.concatenate([sp.r_cart for sp in l_atoms], axis=1)
-    #if dftcomm.image_comm.rank==0: print("coords_cart_all in ewald forces", coords_cart_all)
-    #if dftcomm.image_comm.rank==0: print("coords_cart_all_shape in ewald forces", coords_cart_all.shape)
     tot_atom = np.sum([sp.numatoms for sp in l_atoms])
     str_arg = coords_cart_all.T @ gcart_nonzero
-
-    #if dftcomm.image_comm.rank==0: print("the time to initialize the variables in ewald force is", time.perf_counter()-start_time)
-
-    #start_time=time.perf_counter()
 
     # calculating the analogous structure factor:
     ##This is actually the conjugate of the structure factor. For optimization reasons 
     #it is calculated directly. Put a -1j in the exponential to get the structure factor.
     str_fac = np.sum(np.exp(1j * str_arg) * valence_all.reshape(-1, 1), axis=0)
-    #if dftcomm.image_comm.rank==0: print("str_fac shape", str_fac.shape)
-
-    #if dftcomm.image_comm.rank==0: print("time to calculate the structure factor is", time.perf_counter()-start_time)
-
-    # getting the error bounds TODO: write the error formula
-    #
-    # start_time=time.perf_counter()
     alpha = 2.8
 
     def err_bounds(_alpha):
@@ -171,22 +148,17 @@ def force_ewald(
                 2
                 * np.sum(valence_all) ** 2
                 * np.sqrt(_alpha / np.pi)
-                * erfc(np.sqrt(gspc.ecut / 2 / _alpha))
+                * erfc(np.sqrt( gspc.ecut / 2/_alpha))
         )
-
+    
     while err_bounds(alpha) > EWALD_ERR_THR:
         alpha -= 0.1
         if alpha < 0:
             raise ValueError(
                 f"'alpha' cannot be set for ewald energy calculation; estimated error too large"
             )
-    #if dftcomm.image_comm.rank==0: print("time to calculate the error bounds is", time.perf_counter()-start_time)
-
-    #start_time=time.perf_counter()
     eta = np.sqrt(alpha)
     fact = 4 if gamma_only else 2
-    
-    #if dftcomm.image_comm.rank==0: print("F_L_arg shape", F_L_arg.shape)
     
     str_fac *= np.exp(-gg_nonzero / 4 / alpha) / gg_nonzero
     sumnb = np.cos(str_arg) * np.imag(str_fac) - np.sin(str_arg) * np.real(str_fac)
@@ -194,46 +166,36 @@ def force_ewald(
     F_L *= - valence_all.T
     F_L *= 2 * PI / omega
     F_L *= fact/RYDBERG_HART
-    #if dftcomm.image_comm.rank==0: print("time to calculate the F_L is", time.perf_counter()-start_time)
-    #if dftcomm.image_comm.rank==0: print("F_L", F_L)
+    ##If the intra-pwgrp size is not 1, then we need to sum the forces over the intra-pwgrp
+    if dftcomm.pwgrp_intra.size!=1: F_L=dftcomm.pwgrp_intra.allreduce(F_L)
 
-    # calculating the short range forces
-    #start_time=time.perf_counter()
-    rmax = 4 / eta / alat
-    max_num = 50
-    trans=transgen(beta=eta, latvec=latvec)
+    rmax = 5 / eta / alat
+    max_num = 100
+    trans=transgen(latvec=latvec, rmax=rmax)
+
     F_S = np.zeros((3, tot_atom))
     for atom1 in range(tot_atom):
         for atom2 in range(tot_atom):
             dtau = (coords_cart_all[:, atom1] - coords_cart_all[:, atom2]) / alat
-            #rgen_time=time.perf_counter()
-            rgenerate = rgen(trans=trans,
-                             dtau=dtau,
+            recvec=np.array(gspc.recilat.axes_tpiba)
+            dtau_rec=dtau@recvec.T
+            dtau_frac=dtau_rec-np.round(dtau_rec)
+            dtau0=latvec.T@dtau_frac
+            rgenerate = rgen(atom1=atom1,
+                             atom2=atom2,
+                             trans=trans,
+                             dtau=dtau0,
                              max_num=max_num,
                              rmax=rmax
                              )
             r, r_norm, vec_num= rgenerate
-            #if dftcomm.image_comm.rank==0: print("the loop number is", atom1, atom2, "and the time to generate r is", time.perf_counter()-rgen_time)
-            #vec_time=time.perf_counter()
             if vec_num!=0:
                 rr=r_norm*alat
                 fact=2*valence_all[atom1] * valence_all[atom2] * ELECTRON_RYD ** 2 /2* (
                                 erfc(eta * rr) / rr + 2 * eta / np.sqrt(PI) * np.exp(-eta ** 2 * rr ** 2)) / rr ** 2
                 r_eff_vec = r * alat
                 F_S[:, atom1] -= np.sum(fact * r_eff_vec, axis=1)
-            '''for vec in range(vec_num):
-                rr = (r_norm[vec]) * alat
-                fact = 2*valence_all[atom1] * valence_all[atom2] * ELECTRON_RYD ** 2 /2* (
-                            erfc(eta * rr) / rr + 2 * eta / np.sqrt(PI) * np.exp(-eta ** 2 * rr ** 2)) / rr ** 2
-                r_eff_vec = r[:, vec] * alat
-                F_S[:, atom1] -= fact * r_eff_vec'''
-            #if dftcomm.image_comm.rank==0: print("the loop number is", atom1, atom2, "and the time to loop over the vec is", time.perf_counter()-vec_time)
-    #if dftcomm.image_comm.rank==0: print("time to calculate the F_S is", time.perf_counter()-start_time)
-    #if dftcomm.image_comm.rank==0: print("F_S", F_S)
     Force = F_S + F_L
     Force=Force.T
-    #if dftcomm.image_comm.rank==0: print("The 1st columns represent atoms and the rows represent x, y, z coordinates.")
-    #if dftcomm.image_comm.rank==0: print("the ewald forces before symmetrization", Force)
     Force = crystal.symm.symmetrize_vec(Force)
-    #if dftcomm.image_comm.rank==0: print("the ewald forces after symmetrization", Force)
     return Force
