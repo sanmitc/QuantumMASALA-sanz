@@ -35,31 +35,18 @@ def force_local(dftcomm: DFTCommMod,
     cart_g = gspc.g_cart[:,idxsort]
     if cart_g.ndim==3:
         cart_g=cart_g.reshape(cart_g.shape[0],cart_g.shape[-1])
-    print("coords_cart_all_shape", coords_cart_all.shape)
-    print("cart_g_shape", cart_g.shape)
     gtau = coords_cart_all.T @ cart_g
     omega=gspc.reallat_cellvol
-    #if dftcomm.image_comm.rank==0: print('Time to setup the crystal and g-space', perf_counter()-start_time)
-
-    #start_time=perf_counter()
-    ###Constructing the local pseudopotential
     v_loc=np.zeros((tot_num, numg))
     for isp in range(num_typ):
         v_loc[labels==isp]=vloc[isp].data
     v_loc=v_loc[:,idxsort]
- 
-    #if dftcomm.image_comm.rank==0: print('Time to construct the local pseudopotential', perf_counter()-start_time)
-
-    #start_time=perf_counter()
     fact=2 if gamma_only else 1
-    force_local=np.zeros((tot_num, 3))
+    local_force=np.zeros((tot_num, 3))
     vrho=np.multiply(v_loc,(np.imag(np.exp(1j*gtau)*rho)/RYDBERG))
-    #if dftcomm.image_comm.rank==0: print("time taken to calculate the vrho", perf_counter()-start_time)
-    #start_time=perf_counter()
-    force_local=vrho@cart_g.T*omega*fact
-    print("force_local", force_local)   
-    #if dftcomm.image_comm.rank==0: print("time taken to calculate the force through matrix multiplications", perf_counter()-start_time)
-    #start_time=perf_counter()
+    local_force=vrho@cart_g.T*omega*fact
+    if local_force.ndim==3:
+        local_force=local_force[0]
+    if dftcomm.pwgrp_intra.size!=1: force_local=dftcomm.pwgrp_intra.allreduce(local_force)
     force_local=cryst.symm.symmetrize_vec(force_local[0] if cart_g.ndim==3 else force_local)
-    #if dftcomm.image_comm.rank==0: print("time taken to symmetrize the force", perf_counter()-start_time)
     return force_local
