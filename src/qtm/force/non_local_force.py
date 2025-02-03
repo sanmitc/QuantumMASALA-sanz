@@ -16,8 +16,12 @@ def force_nonloc(dftcomm:DFTCommMod,
     ##Starting of the parallelization over bands
     assert isinstance(numbnd, int)
 
-    with dftcomm.kgrp_intra as comm:
-        band_slice=scatter_slice(numbnd, comm.size, comm.rank)
+    ##No G space parallelization
+    if dftcomm.pwgrp_intra==None:
+        with dftcomm.kgrp_intra as comm:
+            band_slice=scatter_slice(numbnd, comm.size, comm.rank)
+    else:
+        band_slice=np.arange(numbnd)
 
     ##Getting the characteristics of the crystal
     l_atoms = crystal.l_atoms
@@ -27,7 +31,6 @@ def force_nonloc(dftcomm:DFTCommMod,
 
     ##Initializing the force array 
     force_nl=np.zeros((tot_atom, 3))
-
     k_counter=0
     for wfn in wavefun:
         for k_wfn in wfn:
@@ -45,9 +48,7 @@ def force_nonloc(dftcomm:DFTCommMod,
             ##It is being calculated in the root and then broadcasted over to other processors in same k group according to band parallelization
             for ityp in range(num_typ):
                 sp=l_atoms[ityp]
-
                 vkb_full, dij = dij_vkb[ityp]
-
                 for inum in range(sp.numatoms):
                     atom_label_sp=atom_label[inum]
                     row_vkb=int(vkb_full.data.shape[0]/sp.numatoms)
@@ -55,22 +56,20 @@ def force_nonloc(dftcomm:DFTCommMod,
                     dij_sp=dij[atom_label_sp*row_vkb:(atom_label_sp+1)*row_vkb, atom_label_sp*row_vkb:(atom_label_sp+1)*row_vkb]
                     ##Constructing the G\beta\psi
                     gkcart_struc=gkcart.reshape(-1,1,3)
-                    evc_sp=evc.data.T            
+                    evc_sp=evc.data.T
                     Kc=gkcart_struc*evc_sp[:,:,None]
                     GbetaPsi=np.einsum("ij, jkl->ikl", vkb, np.conj(Kc))
-                    GbetaPsi=dftcomm.pwgrp_intra.allreduce(GbetaPsi)
+                    GbetaPsi=dftcomm.image_comm.allreduce(GbetaPsi)
                     ##Constructing the \beta\psi
                     betaPsi=np.conj(vkb)@(evc_sp*occ_num.reshape(1,-1))
                     betaPsi=dij_sp@betaPsi
-                    betaPsi=dftcomm.pwgrp_intra.allreduce(betaPsi)
+                    betaPsi=dftcomm.image_comm.allreduce(betaPsi)
                     ##Multiplying Together
-            
                     V_NL_Psi=np.sum(GbetaPsi*betaPsi.reshape(*betaPsi.shape, 1), axis=(0,1))
                     trace=-2*np.imag(V_NL_Psi)
                     ##Multiply by Weight
                     trace = trace * k_weight
                     force_nl[atom_counter]+=trace 
-
                     atom_counter+=1
         k_counter+=1
     force_nl/=RYDBERG_HART

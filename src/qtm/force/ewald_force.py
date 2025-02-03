@@ -181,9 +181,7 @@ def force_ewald(
             dtau_rec=dtau@recvec.T
             dtau_frac=dtau_rec-np.round(dtau_rec)
             dtau0=latvec.T@dtau_frac
-            rgenerate = rgen(atom1=atom1,
-                             atom2=atom2,
-                             trans=trans,
+            rgenerate = rgen(trans=trans,
                              dtau=dtau0,
                              max_num=max_num,
                              rmax=rmax
