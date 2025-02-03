@@ -47,6 +47,6 @@ def force_local(dftcomm: DFTCommMod,
     local_force=vrho@cart_g.T*omega*fact
     if local_force.ndim==3:
         local_force=local_force[0]
-    if dftcomm.pwgrp_intra.size!=1: force_local=dftcomm.pwgrp_intra.allreduce(local_force)
+    if dftcomm.pwgrp_intra!=None: force_local=dftcomm.pwgrp_intra.allreduce(local_force)
     force_local=cryst.symm.symmetrize_vec(force_local[0] if cart_g.ndim==3 else force_local)
     return force_local

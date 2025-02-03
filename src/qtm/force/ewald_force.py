@@ -167,7 +167,7 @@ def force_ewald(
     F_L *= 2 * PI / omega
     F_L *= fact/RYDBERG_HART
     ##If the intra-pwgrp size is not 1, then we need to sum the forces over the intra-pwgrp
-    if dftcomm.pwgrp_intra.size!=1: F_L=dftcomm.pwgrp_intra.allreduce(F_L)
+    if dftcomm.pwgrp_intra!=None: F_L=dftcomm.pwgrp_intra.allreduce(F_L)
 
     rmax = 5 / eta / alat
     max_num = 100
