@@ -84,12 +84,13 @@ si_atoms = BasisAtoms(
     np.array([[0.875, 0.875, 0.875], [0.125, 0.125, 0.125]]).T,
 )
 
-crystal_unit = Crystal(reallat, [si_atoms]) 
-crystal_supercell=crystal_unit.gen_supercell([supercell_size] * 3)
+crystal = Crystal(reallat, [si_atoms]) 
+crystal_supercell=crystal.gen_supercell([supercell_size] * 3)
 reallat_supercell=crystal_supercell.reallat
 ##print the crystal coordinates of the supercell
 #print("The crystal coordinates of the supercell", crystal_supercell.l_atoms[0].r_alat)
 r_alat_supercell=crystal_supercell.l_atoms[0].r_alat.T
+numatom=r_alat_supercell.shape[0]
 
 #print("the original coordinates are", r_alat_supercell)
 
@@ -158,12 +159,9 @@ si_atoms_supercell = BasisAtoms.from_alat(
     "si",
     si_oncv,
     28.086,
-    reallat_supercell,
+    reallat,
     N,
 )
-
-crystal = Crystal(reallat_supercell, [si_atoms_supercell]) 
-#crystal=crystal_supercell
 
  # Represents the crystal
 
@@ -177,114 +175,228 @@ crystal = Crystal(reallat_supercell, [si_atoms_supercell])
 # Generating k-points from a Monkhorst Pack grid (reduced to the crystal's IBZ)
 mpgrid_shape = (1, 1, 1)
 mpgrid_shift = (False, False, False)
-kpts = gen_monkhorst_pack_grid(crystal, mpgrid_shape, mpgrid_shift)
+
 
 # -----Setting up G-Space of calculation-----
 ecut_wfn = 25 * RYDBERG
 ecut_rho = 4 *ecut_wfn
-grho_serial = GSpace(crystal.recilat, ecut_rho)
+
 
 # If G-space parallelization is not required, use the serial G-space object
 #print("N_pwgrp", dftcomm.n_pwgrp)
 #print("Image_comm_size", dftcomm.image_comm.size)
-if dftcomm.n_pwgrp == dftcomm.image_comm.size:  
-    grho = grho_serial
-else:
-    grho = DistGSpace(comm_world, grho_serial)
-gwfn = grho
 
-print("the type of grho is", type(grho))    
 print(flush=True)
 
-numbnd = int(np.round(1.2*(crystal.numel // 2))) # Ensure adequate # of bands if system is not an insulator
+ # Ensure adequate # of bands if system is not an insulator
 conv_thr = 1e-8 * RYDBERG
 diago_thr_init = 1e-2 * RYDBERG
 
-out = scf(
-    dftcomm,
-    crystal,
-    kpts,
-    grho,
-    gwfn,
-    numbnd,
-    is_spin=False,
-    is_noncolin=False,
-    symm_rho=True,
-    rho_start=None,
-    occ_typ="smear",
-    smear_typ="gauss",
-    e_temp=0.01 * RYDBERG,
-    conv_thr=conv_thr,
-    diago_thr_init=diago_thr_init,
-    iter_printer=print_scf_status,
-    force_stress=True
-)
+r_alat_supercell=crystal_supercell.l_atoms[0].r_alat.T
 
-scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute= out
+#print("the original coordinates are", r_alat_supercell)
 
-initial_time=time.time()
+high=1e-3
+low=-1e-3
+num_itr=10
+##Make a dictionary to store the arrays:
 
-start_time = time.time()
-force_ewa=force_ewald(dftcomm=dftcomm,
-                      crystal=crystal,
-                      gspc=gwfn, 
-                      gamma_only=False)
+def convert_to_qe_input(coordinates):
+    qe_input = ""
+    for coord in coordinates:
+        ##truncate the coordinates to 8 decimal places
+        coord = [round(c, 9) for c in coord]
+        qe_input += f"Si {coord[0]} {coord[1]} {coord[2]}\n"
+    return qe_input
 
-if dftcomm.image_comm.rank==0:
-    print("force ewald", force_ewa)
-    print("Time taken for ewald force: ", time.time() - start_time)
-print(flush=True)
+def generate_qe_input_file(coordinates, config_index):
+    qe_input = convert_to_qe_input(coordinates)
+    input_template = f"""
+&control
+    calculation = 'scf',
+    restart_mode='from_scratch',
+    prefix = 'si_{config_index}',
+    tstress = .true.,
+    tprnfor = .true.,
+    verbosity = 'high',
+    pseudo_dir = '/home/sanmitc/qe-7.3/pseudo/',
+    outdir='/home/sanmitc/qe-7.3/tempdir/'
+/
+&system
+    ibrav = 2,
+    celldm(1) = 30.6,
+    nat = {len(coordinates)},
+    nbnd=130,
+    ntyp = 1,
+    ecutwfc = 25.0
+    nosym=.true
+    occupations= 'smearing',
+    smearing= 'gaussian',
+    degauss= 0.01
+/
+&electrons
+    diagonalization='davidson'
+    mixing_mode = 'plain'
+    conv_thr = 1.0d-8,
+    mixing_beta = 0.3,
+/
+ATOMIC_SPECIES
+Si  28.086  Si_ONCV_PBE-1.2.upf
+ATOMIC_POSITIONS alat
+{qe_input}
+K_POINTS automatic
+1 1 1 0 0 0
+"""
+    with open(f"si_{config_index}.in", "w") as f:
+        f.write(input_template)
+    return f"si_{config_index}.in"
 
-##Calculation time of Local Forces
-start_time = time.time()
-force_loc=force_local(dftcomm=dftcomm,
-                      cryst=crystal, 
-                      gspc=gwfn, rho=rho, 
-                      vloc=v_loc,
-                      gamma_only=False)
+for itr in range(num_itr):
+    if dftcomm.image_comm.rank==0: 
+        print("***********************************")
+        print("***********************************")
+        print("Iteration number", itr)
+        print("***********************************")
+        print("***********************************")
+        print(flush=True)
+        np.random.seed(None)
+        data=np.random.uniform(low, high, size=r_alat_supercell.shape)
 
-if dftcomm.image_comm.rank==0:
-    print("force local", force_loc)
-    print("Time taken for local force: ", time.time() - start_time)
-print(flush=True)
+    data=comm_world.bcast(data, root=0)
+    N=r_alat_supercell+ 1*data
+    qe_input = convert_to_qe_input(N)
+    ##Make the .in file
+    qe_input_file = generate_qe_input_file(N, itr)
 
-##Calculation time of Non Local Forces
-start_time = time.time()
-force_nloc=force_nonloc(dftcomm=dftcomm,
-                          numbnd=numbnd,
-                          wavefun=l_wfn_kgrp, 
-                          crystal=crystal,
-                          nloc_dij_vkb=nloc)
+    data_comma= np.array2string(data, separator=',')
 
-if dftcomm.image_comm.rank==0:
-    print("force non local", force_nloc)
-    print("Time taken for non local force: ", time.time() - start_time)
-print(flush=True)
+    if dftcomm.image_comm.rank==0: 
+        print("the random data added to the crystal is", data_comma, "for iteration", itr)
+        print("the new coordinates in alat units", N, "for iteration", itr)
 
-#force_time=time.time()
-'''start_time = time.time()
-force_total, force_norm=force(dftcomm=dftcomm,
+    si_atoms_supercell = BasisAtoms.from_alat(
+        "si",
+        si_oncv,
+        28.086,
+        reallat_supercell,
+        N,
+    )
+
+    crystal = Crystal(reallat_supercell, [si_atoms_supercell]) 
+    numbnd = int(np.round(1.2*(crystal.numel // 2)))
+    kpts = gen_monkhorst_pack_grid(crystal, mpgrid_shape, mpgrid_shift)
+
+    grho_serial = GSpace(crystal.recilat, ecut_rho)
+
+    if dftcomm.n_pwgrp == dftcomm.image_comm.size:  
+        grho = grho_serial
+    else:
+        grho = DistGSpace(comm_world, grho_serial)
+    gwfn = grho
+
+    print("the type of grho is", type(grho))    
+    print(flush=True)
+
+    out = scf(
+        dftcomm,
+        crystal,
+        kpts,
+        grho,
+        gwfn,
+        numbnd,
+        is_spin=False,
+        is_noncolin=False,
+        symm_rho=True,
+        rho_start=None,
+        occ_typ="smear",
+        smear_typ="gauss",
+        e_temp=0.01 * RYDBERG,
+        conv_thr=conv_thr,
+        diago_thr_init=diago_thr_init,
+        iter_printer=print_scf_status,
+        force_stress=True
+    )
+    
+    scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute= out
+
+    if dftcomm.image_comm.rank==0:
+        print("the eigen values are", l_wfn_kgrp[0][0].evl)
+        print("the occupation numbers are", l_wfn_kgrp[0][0].occ)
+
+    ##print the eigen values
+    #if dftcomm.image_comm.rank==0:
+        #eig=l_wfn_kgrp
+    #print("SCF converged", scf_converged)
+    #print(flush=True)
+
+    initial_time=time.time()
+    force_ewa=force_ewald(dftcomm=dftcomm,
+                        crystal=crystal,
+                        gspc=gwfn, 
+                        gamma_only=False)
+    
+
+    if dftcomm.image_comm.rank==0:
+        print("force ewald", force_ewa)
+        print("Time taken for ewald force: ", time.time() - initial_time)
+    print(flush=True)
+
+    ##Calculation time of Local Forces
+    start_time = time.time()
+    force_loc=force_local(dftcomm=dftcomm,
+                        cryst=crystal, 
+                        gspc=gwfn, rho=rho, 
+                        vloc=v_loc,
+                        gamma_only=False)
+
+    if dftcomm.image_comm.rank==0:
+        print("force local", force_loc)
+        print("Time taken for local force: ", time.time() - initial_time)
+    print(flush=True)
+
+    ##Calculation time of Non Local Forces
+    start_time = time.time()
+    force_nloc=force_nonloc(dftcomm=dftcomm,
                             numbnd=numbnd,
-                            wavefun=l_wfn_kgrp,
+                            wavefun=l_wfn_kgrp, 
                             crystal=crystal,
-                            gspc=gwfn, 
-                            rho=rho,
-                            vloc=v_loc,
-                            nloc_dij_vkb=nloc,
-                            gamma_only=False,
-                            verbosity=True)
+                            nloc_dij_vkb=nloc)
+
+    if dftcomm.image_comm.rank==0:
+        print("force non local", force_nloc)
+        print("Time taken for non local force: ", time.time() - initial_time)
+    print(flush=True)
+
+    #force_time=time.time()
+    start_time = time.time()
+    force_total, force_norm=force(dftcomm=dftcomm,
+                                numbnd=numbnd,
+                                wavefun=l_wfn_kgrp,
+                                crystal=crystal,
+                                gspc=gwfn, 
+                                rho=rho,
+                                vloc=v_loc,
+                                nloc_dij_vkb=nloc,
+                                gamma_only=False,
+                                verbosity=True)
+
+    if dftcomm.image_comm.rank==0:
+        print("force total", force_total)
+        print("force norm", force_norm)
+        print("Time taken for force: ", time.time() - start_time)
+
+    if comm_world.rank == 0:
+        print("SCF Routine has exited")
+        print(qtmlogger)
+
+    final_time=time.time() 
+
+    if dftcomm.image_comm.rank==0:
+        print("Total time taken for the calculation", final_time-initial_time)
+        print("End of iteration", itr)
+        print("======================================")
+        print("======================================")
+        print("======================================")
+        print(flush=True)
 
 
-if dftcomm.image_comm.rank==0:
-    print("force total", force_total)
-    print("force norm", force_norm)
-    print("Time taken for force: ", time.time() - start_time)'''
-
-if comm_world.rank == 0:
-    print("SCF Routine has exited")
-    print(qtmlogger)
-
-final_time=time.time() 
-
-if dftcomm.image_comm.rank==0:
-    print("Total time taken for the calculation", final_time-initial_time)
