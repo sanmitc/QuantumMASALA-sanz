@@ -1,5 +1,5 @@
 import numpy as np
-
+import gc
 
 from qtm.crystal import Crystal
 from qtm.gspace import GSpace
@@ -42,11 +42,15 @@ def force_local(dftcomm: DFTCommMod,
         v_loc[labels==isp]=vloc[isp].data
     v_loc=v_loc[:,idxsort]
     fact=2 if gamma_only else 1
-    local_force=np.zeros((tot_num, 3))
+    l_force=np.zeros((tot_num, 3))
     vrho=np.multiply(v_loc,(np.imag(np.exp(1j*gtau)*rho)/RYDBERG))
-    local_force=vrho@cart_g.T*omega*fact
-    if local_force.ndim==3:
-        local_force=local_force[0]
-    if dftcomm.pwgrp_intra!=None: force_local=dftcomm.pwgrp_intra.allreduce(local_force)
-    force_local=cryst.symm.symmetrize_vec(force_local[0] if cart_g.ndim==3 else force_local)
+    l_force=np.real(vrho@cart_g.T*omega*fact)
+    if l_force.ndim==3:
+        l_force=l_force[0]
+    if dftcomm.pwgrp_intra!=None: 
+        l_force=dftcomm.pwgrp_intra.allreduce(l_force)
+    force_local=cryst.symm.symmetrize_vec(l_force)
+    force_local-=np.mean(force_local, axis=0)
+    del v_loc, vrho, l_force, rho, labels, coords_cart_all, cryst, gspc, vloc, dftcomm
+    gc.collect()
     return force_local
