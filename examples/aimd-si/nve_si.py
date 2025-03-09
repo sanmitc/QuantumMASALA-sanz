@@ -172,7 +172,7 @@ gwfn = grho
 
 print("the type of grho is", type(grho))    
 
-numbnd = int(2.5*(crystal.numel // 2)) # Ensure adequate # of bands if system is not an insulator
+numbnd = int(1.2*(crystal.numel // 2)) # Ensure adequate # of bands if system is not an insulator
 conv_thr = 1e-8 * RYDBERG
 diago_thr_init = 1e-2 * RYDBERG
 
@@ -213,7 +213,7 @@ from time import perf_counter
 
 initial_time=perf_counter()
 
-out = NVE_MD(dftcomm, crystal, max_t, dt, T_init, mpgrid_shape, mpgrid_shift , ecut_wfn,
+out = NVE_MD(dftcomm, crystal, max_t, dt, T_init, kpts, grho, gwfn, ecut_wfn,
           numbnd, is_spin=False, is_noncolin=False,
           symm_rho=False, rho_start=None, occ_typ='smear',
             smear_typ='gauss', e_temp=1E-2 * RYDBERG,
@@ -221,7 +221,6 @@ out = NVE_MD(dftcomm, crystal, max_t, dt, T_init, mpgrid_shape, mpgrid_shift , e
           iter_printer=print_scf_status)
 
 coords, time, temperature, energy= out
-
 
 final_time=perf_counter()
 print("The time taken is", final_time-initial_time)
