@@ -154,10 +154,10 @@ def check_system(
             "grho.recilat", grho.recilat, "crystal.recilat", crystal.recilat
         )
         check_gspace(comm, gwfn)
-        assert gwfn.recilat is grho.recilat, obj_mismatch_msg(
+        assert gwfn.recilat == grho.recilat, obj_mismatch_msg(
             "gwfn.recilat", gwfn.recilat, "crystal.recilat", crystal.recilat
         )
         check_kpts(comm, kpts)
-        assert kpts.recilat is crystal.recilat, obj_mismatch_msg(
+        assert kpts.recilat == crystal.recilat, obj_mismatch_msg(
             "kpts.recilat", kpts.recilat, "crystal.recilat", crystal.recilat
         )
