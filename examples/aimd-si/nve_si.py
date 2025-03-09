@@ -92,9 +92,9 @@ crystal_supercell=crystal_unit.gen_supercell([supercell_size] * 3)
 #print("The crystal coordinates of the supercell", crystal_supercell.l_atoms[0].r_alat)
 r_alat_supercell=crystal_supercell.l_atoms[0].r_alat.T
 
-#print("the original coordinates are", r_alat_supercell)
+if dftcomm.image_comm.rank==0: print("the original coordinates are\n", r_alat_supercell, "\n")
 ##relaxed coordinates
-data=[[-0.25360773, -0.09576083, -0.50259631, -0.22927595, -0.67175465,
+'''data=[[-0.25360773, -0.09576083, -0.50259631, -0.22927595, -0.67175465,
         -0.31229879, -0.32129343, -0.05276206, -0.3994334 , -0.19186968,
         -0.53585398, -0.38089773, -0.37858821, -0.05165412, -0.4343018 ,
         -0.23007814, -0.64720126, -0.46900115, -0.39635321, -0.27483042,
@@ -127,21 +127,20 @@ data=[[-0.25360773, -0.09576083, -0.50259631, -0.22927595, -0.67175465,
          0.5537072 ,  0.31788079,  0.85537208,  0.46725145,  0.77909767,
          0.55353992,  0.81000004,  0.64698277,  0.96561542,  0.69427326,
          0.92543345,  0.74384706,  0.81771324,  0.78211051]]
-data=np.array(data).T
-
-N=data
+data=np.array(data).T'''
 
 #print("the new coordinates in alat units", N)
 
-si_atoms_supercell = BasisAtoms.from_alat(
+'''si_atoms_supercell = BasisAtoms.from_alat(
     "si",
     si_oncv,
     28.086,
     reallat,
     N,  # Fractional coordinates
-)
+)'''
 
-crystal = Crystal(reallat, [si_atoms_supercell]) 
+#crystal = Crystal(reallat, [crystal_supercell]) 
+crystal=crystal_supercell
 
  # Represents the crystal
 
@@ -158,7 +157,7 @@ mpgrid_shift = (False, False, False)
 kpts = gen_monkhorst_pack_grid(crystal, mpgrid_shape, mpgrid_shift)
 
 # -----Setting up G-Space of calculation-----
-ecut_wfn = 10 * RYDBERG
+ecut_wfn = 7 * RYDBERG
 ecut_rho = 4 *ecut_wfn
 grho_serial = GSpace(crystal.recilat, ecut_rho)
 
@@ -171,7 +170,6 @@ else:
     grho = DistGSpace(comm_world, grho_serial)
 gwfn = grho
 
-
 print("the type of grho is", type(grho))    
 
 numbnd = int(2.5*(crystal.numel // 2)) # Ensure adequate # of bands if system is not an insulator
@@ -179,22 +177,37 @@ conv_thr = 1e-8 * RYDBERG
 diago_thr_init = 1e-2 * RYDBERG
 
 #How many atoms in the cell?
-tot_num = np.sum([sp.numatoms for sp in crystal.l_atoms])
-extra=int(max(4, 2*tot_num))
-numbnd = int(2*tot_num)  +extra # Ensure adequate # of bands if system is not an insulator
+#numbnd = int(2*tot_num)  +extra # Ensure adequate # of bands if system is not an insulator
 conv_thr = 1E-8 * RYDBERG
 diago_thr_init = 1E-4 * RYDBERG
 
-
 ##Smearing
-occ_typ="smear"
-smear_typ = 'gauss'
-e_temp = 1E-2 * RYDBERG
 
-steps=100
-dt=10
+steps=2000
+dt=40
+mixing_beta=0.3
 max_t=steps*dt
-T_init=5
+T_init=300
+smear_typ='gauss'
+e_temp=1E-2 * RYDBERG
+occ_typ='smear'
+
+smear_print=1 if smear_typ=='gauss' else 0
+occ_print=1 if occ_typ=='smear' else 0
+
+if dftcomm.image_comm.rank==0: 
+    print("nstep=", steps)
+    print("\ndt=", dt)
+    print("\necutwfc=", ecut_wfn)
+    print("\nocc_typ=", occ_print)
+    print("\nsmear_typ=", smear_print)
+    print("\ne_temp=", e_temp)
+    print("\nconv_thr=", conv_thr)
+    print("\ndiago_thr_init=", diago_thr_init)
+    print("\nmixing_beta=", mixing_beta)
+    print("\nnumbnd=", numbnd)
+    print("\ninitialtemp=", T_init)
+    print(flush=True)
 
 from time import perf_counter
 
