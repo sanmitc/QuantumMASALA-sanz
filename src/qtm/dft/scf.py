@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import logging
+import gc
 
 from qtm.logger import qtmlogger
 from qtm.config import MPI4PY_INSTALLED
@@ -689,10 +690,22 @@ def scf(
                 return np.array(vxc_arr)
 
             vxc_arr = calculate_vxc_data()
+            for var in list(locals().keys()):
+                if var not in ["scf_converged", "rho_in", "l_kswfn_kgrp", "en", "vxc_arr"]:
+                    del locals()[var]
+            gc.collect()
             return scf_converged, rho_in, l_kswfn_kgrp, en, vxc_arr
         if force_stress:
-            return scf_converged, rho_in, l_kswfn_kgrp, en, v_ion_list, nloc_dij_vkb, xc_compute
+            for var in list(locals().keys()):
+                if var not in ["scf_converged", "rho_in", "l_kswfn_kgrp", "en", "nloc_dij_vkb"]:
+                    del locals()[var]
+            gc.collect()
+            return scf_converged, rho_in, l_kswfn_kgrp, en, v_ion_list, nloc_dij_vkb, xc_compute, 
         else:
+            for var in list(locals().keys()):
+                if var not in ["scf_converged", "rho_in", "l_kswfn_kgrp", "en"]:
+                    del locals()[var]
+            gc.collect()
             return scf_converged, rho_in, l_kswfn_kgrp, en
     #endregion
 #endregion
