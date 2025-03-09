@@ -1,5 +1,6 @@
 from __future__ import annotations
-
+import gc
+import tracemalloc
 import numpy as numpy
 
 from qtm.constants import RYDBERG, ELECTRONVOLT, vel_HART, BOLTZMANN_SI, BOLTZMANN_HART, M_NUC_HART, MASS_SI
@@ -103,8 +104,9 @@ def NVE_MD(dftcomm: DFTCommMod,
           max_t: float,
           dt: float,
           T_init: float,
-          kgrid:tuple[int, int, int],
-          kshift: tuple[bool, bool, bool],
+          kpts: KList,
+          grho: GSpace,
+          gwfn: GSpace,
           ecut_wfn:float,
           numbnd:int,
           is_spin:bool,
@@ -136,11 +138,11 @@ def NVE_MD(dftcomm: DFTCommMod,
         ppdat_cryst=np.array([sp.ppdata for sp in l_atoms])
         label_cryst=np.array([sp.label for sp in l_atoms])
         mass_cryst=np.array([sp.mass for sp in l_atoms])*M_NUC_HART
-        mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms]).reshape(-1,1)*M_NUC_HART
-        tot_mass=np.sum(mass_all)
+        mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms])*M_NUC_HART
+        #tot_mass=np.sum(mass_all)
         num_typ = len(l_atoms)
         reallat=crystal.reallat
-        lnum_labels = np.repeat([np.arange(num_typ)], [sp.numatoms for sp in l_atoms])
+        #lnum_labels = np.repeat([np.arange(num_typ)], [sp.numatoms for sp in l_atoms])
         #coords_alat_all = np.concatenate([sp.r_alat for sp in l_atoms], axis=1)
         coords_cart_all = np.concatenate([sp.r_cart for sp in l_atoms], axis =1).T
         ##This is a numatom times 3 array containing the coordinates of all the atoms in the crystal
@@ -152,47 +154,48 @@ def NVE_MD(dftcomm: DFTCommMod,
         ##First we assign velocities to the atoms
         #print("the rank of the processor is", comm.rank, "out of the total processors", comm.size)
         vel=np.zeros((tot_num, 3))
+        np.random.seed(None)
         vel=np.random.rand(tot_num, 3)-0.5
-        #print("random velocities at the time of initialization for processor", comm.rank, vel)
+        #print("random velocities at the time of initialicomzation for processor", comm.rank, vel)
         vel=comm.allreduce(vel)   
         #print("random velocities at the time of initialization for processor after reducing", comm.rank, vel)   
         vel/=comm.size
         ##Calculate the momentum
         #print("velocities at the time of initialization for processor after dividing", comm.rank, vel)
         #print(flush=True)
-        momentum=mass_si*vel
-
-        ##Compute the momentum of the center of mass
-        momentum_cm=np.sum(momentum, axis=0)
+        momentum=mass_si*vel.T
 
         ##Subtract the momentum of the center of mass from the momentum of the atoms
-        momentum-=momentum_cm
-
+        momentum_T=momentum.T
+        momentum_T-=np.mean(momentum, axis=1)
         ##Calculate the new velocity after subtracting the momentum of the center of mass
         
-        vel=momentum/mass_si
+        vel=momentum_T.T/mass_si
+        print("shapw of vel is", vel.shape)
 
         ##Calculate the kinetic energy
-        ke=0.5*np.sum(np.sum(momentum**2, axis=1)/mass_si)
-
+        ke=0.5*np.sum(mass_si*(vel)**2)
+        del momentum, momentum_T
         ##Calculate the temperature
         T=2*ke/(3*tot_num*BOLTZMANN_SI)
-        #print("the temperature calculated from the random velocities is", T, "K")
+        if dftcomm.image_comm.rank==0: print("the temperature calculated from the random velocities is", T, "K")
 
         ##Rescale the velocities to the desired temperature
         vel*=np.sqrt(T_init/T)
 
         ##Convert the velocities to atomic units
         vel/=vel_HART
-        print("re-scaled velocities in atomic units at the time of initializatiion for processor", dftcomm.image_comm.rank, vel)
+        if dftcomm.image_comm.rank==0: print("re-scaled velocities in atomic units at the time of initializatiion for processor", dftcomm.image_comm.rank, "\n", vel)
 
         ##Calculate the previous coordinates
-        coords_cart_prev=coords_cart_all-vel*dt
+        coords_cart_prev=coords_cart_all-vel.T*dt
         #print("coords cart prev", coords_cart_prev)
+        del vel
 
-        time_array=[]
-        energy_array=[]
-        temperature_array=[]
+        time_step=int(max_t/dt)
+        time_array = np.empty(time_step)
+        energy_array = np.empty(time_step)
+        temperature_array = np.empty(time_step)
 
         #endregion: Initializing the Molecular Dynamics simulations
 
@@ -216,16 +219,9 @@ def NVE_MD(dftcomm: DFTCommMod,
                                                     *coord_alat_sp)
                     l_atoms_itr.append(Basis_atoms_sp)
                 crystal_itr=Crystal(reallat, l_atoms_itr)
-                kpts_itr=gen_monkhorst_pack_grid(crystal_itr, kgrid, kshift, use_symm, is_time_reversal)
-
-                ecut_rho=4*ecut_wfn
-                grho_itr_serial=GSpace(crystal_itr.recilat, ecut_rho)
-                if dftcomm.n_pwgrp == dftcomm.image_comm.size:  
-                    grho_itr = grho_itr_serial
-                else:
-                    grho_itr = DistGSpace(comm_world, grho_itr_serial)
-                gwfn_itr=grho_itr
-                FieldG_rho_itr: FieldGType= get_FieldG(grho_itr)
+                #kpts_itr=gen_monkhorst_pack_grid(crystal_itr, kgrid, kshift, use_symm, is_time_reversal)
+                
+                FieldG_rho_itr: FieldGType= get_FieldG(grho)
                 if rho is not None: rho_itr=FieldG_rho_itr(rho.data)
                 else: rho_itr=rho
 
@@ -237,9 +233,9 @@ def NVE_MD(dftcomm: DFTCommMod,
                 out = scf(
                         dftcomm=dftcomm, 
                         crystal=crystal_itr, 
-                        kpts=kpts_itr, 
-                        grho=grho_itr, 
-                        gwfn=gwfn_itr,
+                        kpts=kpts, 
+                        grho=grho, 
+                        gwfn=gwfn,
                         numbnd=numbnd, 
                         is_spin=is_spin, 
                         is_noncolin=is_noncolin, 
@@ -262,23 +258,29 @@ def NVE_MD(dftcomm: DFTCommMod,
                         )
                 
                 scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute = out
-                print("my rank is", dftcomm.image_comm.rank)
-                print("And I have successfully calculated energy", en.total)
+                if comm.rank==0:  
+                    print("my rank is", dftcomm.image_comm.rank)
+                    print("And I have successfully calculated energy", en.total)
                 #region of calculation of the jacobian i.e the force
 
                 force_itr= force(dftcomm=dftcomm,
                                     numbnd=numbnd,
                                     wavefun=l_wfn_kgrp, 
                                     crystal=crystal_itr,
-                                    gspc=gwfn_itr,
+                                    gspc=gwfn,
                                     rho=rho,
                                     vloc=v_loc,
                                     nloc_dij_vkb=nloc,
                                     gamma_only=False,
-                                    verbosity=False)[0]
-                
-                print("I am process", comm.rank, "and I have calculated the force", force_itr)
+                                    verbosity=True)[0]
 
+                del l_wfn_kgrp, v_loc, nloc, xc_compute, crystal_itr, FieldG_rho_itr
+                for var in list(locals().keys()):
+                    if var not in ["en", "force_itr", "rho"]:
+                        del locals()[var]
+                gc.collect()  
+                #if dftcomm.image_comm.rank==0:
+                    #print("I am process", comm.rank, "and I have calculated the force", force_itr)
             return en.total, force_itr, rho
         time=0
         rho_md=rho_start
@@ -286,45 +288,68 @@ def NVE_MD(dftcomm: DFTCommMod,
         while time<max_t:
             ## Starting of the Iterartion
             en, force_coord, rho_itr=compute_en_force(dftcomm, coords_cart_all, rho_md)
+            if dftcomm.image_comm.rank==0: print("this is iteration", time/dt, "and the force is", force_coord)
+            del rho_md
             rho_md=rho_itr
-
+            del rho_itr
             ##Energy and force are calculated in Rydberg units, convert these to Hartree units
-            en=en*RYDBERG
-            force_coord=force_coord*RYDBERG
+            force_coord*=RYDBERG
 
             ## Calculating accelaration
-            accelaration=force_coord/mass_all
+            accelaration=force_coord.T/mass_all
 
-            coords_new=2*coords_cart_all-coords_cart_prev+accelaration*dt**2
+            coords_new=2*coords_cart_all-coords_cart_prev+accelaration.T*dt**2
+            d_coord=coords_new-coords_cart_all
+            d_COM=np.sum(mass_all*d_coord.T, axis=1)/np.sum(mass_all)
+            coords_new-=d_COM.T
 
-            print("change in coordinates in each iteration", coords_new-coords_cart_all)
+            del d_coord, d_COM
+
+            if dftcomm.image_comm.rank==0:
+                print("change in coordinates in each iteration", coords_new-coords_cart_all)
 
             ##New velocity
             vel_new=(coords_new-coords_cart_prev)/(2*dt)
-
-            ##New momentum
-            momentum_new=mass_all*vel_new
-
+            
             ##New Kinetic Energy
-            ke_new=0.5*np.sum(np.sum(momentum_new**2, axis=1)/mass_all)
-
+            #ke_new=0.5*np.sum(np.sum(momentum_new**2, axis=1)/mass_all)
+            ke_new=0.5*np.sum(mass_all*(vel_new.T)**2)
             ##New Temperature
             T_new=2*ke_new/(3*tot_num*BOLTZMANN_HART)
+
+            del vel_new, accelaration, force_coord
 
             ##Total Energy
             en_total=en+ke_new
         
             time_step=int(time/dt)
-            time_array.append(time_step)
-            energy_array.append(en_total)
-            temperature_array.append(T_new)
+            time_array[time_step]=time
+            temperature_array[time_step]=T_new
+
+
+            Har_to_eV=27.211386245988
+            energy_array[time_step]=en_total
+            
+
+            if dftcomm.image_comm.rank==0:
+                print("The total energy of the system is", en_total*Har_to_eV, "eV")
+                print("The kinetic energy of the system is", ke_new*Har_to_eV, "eV")
+                print("The potential energy of the system is", en*Har_to_eV, "eV")
+                print("The temperature of the system is", T_new, "K")
+                print("The new coordinates are", coords_cart_all/reallat.alat)
+
+            del en, ke_new, T_new, en_total
 
             ##printing the energy and the temperature
-            print("The total energy of the system is", en_total, "Hartree")
-            print("The temperature of the system is", T_new, "K")
-
+            
+            del coords_cart_prev
             coords_cart_prev=coords_cart_all
+            del coords_cart_all
             coords_cart_all=coords_new
+            del coords_new
+            
+            print(flush=True)
+            gc.collect()
             time+=dt
 
         time_array=np.array(time_array)
