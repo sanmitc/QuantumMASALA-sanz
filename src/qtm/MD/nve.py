@@ -150,16 +150,16 @@ def NVE_MD(dftcomm: DFTCommMod,
         #region: Initializing the Molecular Dynamics simulations
         mass_si=mass_all*MASS_SI
         ##First we assign velocities to the atoms
-        print("the rank of the processor is", comm.rank, "out of the total processors", comm.size)
+        #print("the rank of the processor is", comm.rank, "out of the total processors", comm.size)
         vel=np.zeros((tot_num, 3))
         vel=np.random.rand(tot_num, 3)-0.5
-        print("random velocities at the time of initialization for processor", comm.rank, vel)
+        #print("random velocities at the time of initialization for processor", comm.rank, vel)
         vel=comm.allreduce(vel)   
-        print("random velocities at the time of initialization for processor after reducing", comm.rank, vel)   
+        #print("random velocities at the time of initialization for processor after reducing", comm.rank, vel)   
         vel/=comm.size
         ##Calculate the momentum
-        print("velocities at the time of initialization for processor after dividing", comm.rank, vel)
-        print(flush=True)
+        #print("velocities at the time of initialization for processor after dividing", comm.rank, vel)
+        #print(flush=True)
         momentum=mass_si*vel
 
         ##Compute the momentum of the center of mass

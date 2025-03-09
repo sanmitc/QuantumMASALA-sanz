@@ -57,11 +57,11 @@ else:
     COMM_WORLD = None
 
 comm_world = QTMComm(COMM_WORLD)
-print("before starting nve calculation", "the size of the communicator is", comm_world.size)
+#print("before starting nve calculation", "the size of the communicator is", comm_world.size)
 # Only G-space parallelization
 # K-point and/or band parallelization along with G-space parallelization is currently broken.
 dftcomm = DFTCommMod(comm_world, 1, comm_world.size)
-print("before starting nve calculation", "the size of the communicator is", dftcomm.image_comm.size)
+#print("before starting nve calculation", "the size of the communicator is", dftcomm.image_comm.size)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("supercell_size", help="Side length of the supercell", type=int)
@@ -69,7 +69,7 @@ parser.add_argument("supercell_size", help="Side length of the supercell", type=
 args = parser.parse_args()
 supercell_size = args.supercell_size
 
-alat=10.2*supercell_size
+alat=10.2
 # Lattice
 reallat = RealLattice.from_alat(
     alat, a1=[-0.5, 0.0, 0.5], a2=[0.0, 0.5, 0.5], a3=[-0.5, 0.5, 0.0]  # Bohr
@@ -191,7 +191,7 @@ occ_typ="smear"
 smear_typ = 'gauss'
 e_temp = 1E-2 * RYDBERG
 
-steps=2200
+steps=100
 dt=10
 max_t=steps*dt
 T_init=5
