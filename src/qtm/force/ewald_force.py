@@ -1,4 +1,5 @@
 from scipy.special import erfc
+import gc
 
 import numpy as np
 
@@ -83,6 +84,7 @@ def transgen(latvec: np.ndarray,
     l1_trans=l1_trans[np.newaxis, np.newaxis, :, np.newaxis, :]
     l2_trans=l2_trans[np.newaxis, np.newaxis, np.newaxis, :, :]
     trans=np.squeeze(l0_trans+l1_trans+l2_trans).reshape(-1,3)
+    del i, j, k, l0_trans, l1_trans, l2_trans
     return trans
 
 def rgen(trans:np.ndarray,
@@ -99,6 +101,7 @@ def rgen(trans:np.ndarray,
     r=trans_copy[mask]
     r_norm=norms[mask]
     vec_num=r.shape[0]
+    del trans_copy, norms, mask
     if vec_num >= max_num:
         raise ValueError(f"maximum allowed value of r vectors are {max_num}, got {vec_num}. ")
     return r.T, r_norm, vec_num
@@ -122,8 +125,9 @@ def force_ewald(
 
         Primvec of Gspc.recilat: The columns represent the reciprocal lattice vectors"""
     # getting the characteristic of the g_vectors:
-    gcart_nonzero = gspc.g_cart[:, 1:]
-    gg_nonzero = np.linalg.norm(gcart_nonzero, axis=0)**2
+    gcart_nonzero = gspc.g_cart.T[np.linalg.norm(gspc.g_cart.T, axis=1) > 1e-5]
+    gg_nonzero = np.linalg.norm(gcart_nonzero, axis=1)**2
+    gcart_nonzero = gcart_nonzero.T
 
     # getting the crystal characteristics
     l_atoms = crystal.l_atoms
@@ -169,6 +173,8 @@ def force_ewald(
     ##If the intra-pwgrp size is not 1, then we need to sum the forces over the intra-pwgrp
     if dftcomm.pwgrp_intra!=None: F_L=dftcomm.pwgrp_intra.allreduce(F_L)
 
+    del gg_nonzero, gcart_nonzero, str_arg, str_fac, sumnb
+
     rmax = 5 / eta / alat
     max_num = 100
     trans=transgen(latvec=latvec, rmax=rmax)
@@ -178,9 +184,10 @@ def force_ewald(
         for atom2 in range(tot_atom):
             dtau = (coords_cart_all[:, atom1] - coords_cart_all[:, atom2]) / alat
             recvec=np.array(gspc.recilat.axes_tpiba)
-            dtau_rec=dtau@recvec.T
-            dtau_frac=dtau_rec-np.round(dtau_rec)
+            dtau@=recvec.T
+            dtau_frac=dtau-np.round(dtau)
             dtau0=latvec.T@dtau_frac
+            del dtau_frac, dtau, recvec
             rgenerate = rgen(trans=trans,
                              dtau=dtau0,
                              max_num=max_num,
@@ -193,7 +200,12 @@ def force_ewald(
                                 erfc(eta * rr) / rr + 2 * eta / np.sqrt(PI) * np.exp(-eta ** 2 * rr ** 2)) / rr ** 2
                 r_eff_vec = r * alat
                 F_S[:, atom1] -= np.sum(fact * r_eff_vec, axis=1)
+                del fact, r_eff_vec 
+            del r, r_norm, vec_num, dtau0
     Force = F_S + F_L
     Force=Force.T
     Force = crystal.symm.symmetrize_vec(Force)
+    Force-=np.mean(Force, axis=0)
+    del trans, F_S, F_L, gspc, crystal, reallat, l_atoms, valence_all, coords_cart_all, dftcomm
+    gc.collect()
     return Force
