@@ -1,4 +1,6 @@
 import numpy as np
+import gc
+
 from qtm.crystal import Crystal
 from qtm.constants import RYDBERG_HART
 from qtm.config import NDArray
@@ -71,9 +73,15 @@ def force_nonloc(dftcomm:DFTCommMod,
                     trace = trace * k_weight
                     force_nl[atom_counter]+=trace 
                     atom_counter+=1
+                    del vkb, dij_sp, GbetaPsi, betaPsi, trace, Kc, evc_sp, gkcart_struc, V_NL_Psi
+                del vkb_full, dij
+            del evc, gkspace, k_weight, dij_vkb
         k_counter+=1
     force_nl/=RYDBERG_HART
     force_nl=dftcomm.image_comm.allreduce(force_nl)
     force_nl/=dftcomm.image_comm.size
     force_nl=crystal.symm.symmetrize_vec(force_nl)
+    force_nl-=np.mean(force_nl, axis=0)
+    del nloc_dij_vkb, wavefun, crystal, dftcomm
+    gc.collect()
     return force_nl
