@@ -113,9 +113,7 @@ class FieldRType(BufferType):
         else:
             return np.sum(self, axis=axis) * self.gspc.reallat_dv
 
-
 FieldType = Union[FieldGType, FieldRType]
-
 
 @lru_cache(maxsize=None)
 def get_FieldG(gspc: GSpace) -> Type[FieldGType]:
