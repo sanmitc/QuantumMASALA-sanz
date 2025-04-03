@@ -6,9 +6,10 @@ from qtm.crystal import Crystal, BasisAtoms
 from qtm.pseudo import loc_generate_rhoatomic
 
 from qtm.gspace import GSpace
-
+from qtm.dft import DFTCommMod
 
 def force_scf(del_vhxc: FieldGType,
+              dftcomm: DFTCommMod,
                 cryst:Crystal,
                 grho:GSpace,
                 )->np.ndarray:
@@ -38,7 +39,14 @@ def force_scf(del_vhxc: FieldGType,
     force_scf=np.zeros((tot_num, 3))
     for atom in range(tot_num):
         label=labels[atom]
-        quant=del_vhxc * struct_fact[atom] * np.conj(rho_atom[label])
-        force_scf[atom]=(1j*np.sum(cart_g*quant, axis=1))
+        quant=del_vhxc * struct_fact[atom] * rho_atom[label]
+        force_scf[atom]=np.real((1j*np.sum(cart_g*quant, axis=1)))
+
+    if cart_g.ndim==3:
+        force_scf=force_scf[0]
+    
+    if dftcomm.pwgrp_intra!=None:
+        force_scf=dftcomm.pwgrp_intra.allreduce(force_scf)
+
 
     return force_scf*omega
