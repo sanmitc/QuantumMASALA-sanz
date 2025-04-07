@@ -111,8 +111,6 @@ def Andersen_MD(dftcomm: DFTCommMod,
           numbnd:int,
           is_spin:bool,
           is_noncolin:bool,
-          use_symm:bool=False,
-          is_time_reversal:bool=False,
           symm_rho:bool=True,
           rho_start: FieldGType | tuple[float, ...] | None=None,
           wfn_init: WfnInit | None = None,
@@ -342,10 +340,12 @@ def Andersen_MD(dftcomm: DFTCommMod,
             #endregion end of debug statement
 
             prob=float(nu)*dt
+            print("the probability is", prob)
 
             if comm.rank==0:
                 for atom in range(tot_num):
                     b=np.random.rand()
+                    print("the random number is", b)
                     if b <prob:
                         sigma=np.sqrt(kT/mass_si[atom])
                         vel[atom]=np.random.normal(0, sigma, 3) ##This is in SI units
@@ -353,6 +353,17 @@ def Andersen_MD(dftcomm: DFTCommMod,
                 print("velocity after random scaling", vel)
             comm.Bcast(vel)
             print("the velocity after the random scaling is", vel)
+
+            ##Make the center of Mass stationary
+            momentum=mass_si*vel.T
+            momentum_T=np.array(momentum).T
+            ##Compute the momentum of the center of mass
+            momentum_T-=np.mean(momentum_T, axis=0)
+            ##Calculate the updated velocity of the atoms
+            vel=momentum_T.T/mass_si
+            vel=vel.T
+            ##Calculate the kinetic energy
+
             #Calculating the total energy and Temperature
             ke=0.5*np.sum(mass_all*vel.T**2)
             en_total=en_new+ke

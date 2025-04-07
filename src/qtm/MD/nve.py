@@ -3,7 +3,7 @@ import gc
 import tracemalloc
 import numpy as numpy
 
-from qtm.constants import RYDBERG, ELECTRONVOLT, vel_HART, BOLTZMANN_SI, BOLTZMANN_HART, M_NUC_HART, MASS_SI
+from qtm.constants import RYDBERG, ELECTRONVOLT, vel_RYD, BOLTZMANN_SI, BOLTZMANN_RYD, M_NUC_RYD, MASS_SI
 from qtm.lattice import RealLattice
 from qtm.crystal import BasisAtoms, Crystal
 from qtm.pseudo import UPFv2Data
@@ -111,8 +111,6 @@ def NVE_MD(dftcomm: DFTCommMod,
           numbnd:int,
           is_spin:bool,
           is_noncolin:bool,
-          use_symm:bool=False,
-          is_time_reversal:bool=False,
           symm_rho:bool=True,
           rho_start: FieldGType | tuple[float, ...] | None=None,
           wfn_init: WfnInit | None = None,
@@ -137,8 +135,9 @@ def NVE_MD(dftcomm: DFTCommMod,
         num_in_types=np.array([sp.numatoms for sp in l_atoms])
         ppdat_cryst=np.array([sp.ppdata for sp in l_atoms])
         label_cryst=np.array([sp.label for sp in l_atoms])
-        mass_cryst=np.array([sp.mass for sp in l_atoms])*M_NUC_HART
-        mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms])*M_NUC_HART
+        mass_cryst=np.array([sp.mass for sp in l_atoms])*M_NUC_RYD
+        mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms])*M_NUC_RYD
+        print(mass_all)
         #tot_mass=np.sum(mass_all)
         num_typ = len(l_atoms)
         reallat=crystal.reallat
@@ -150,7 +149,7 @@ def NVE_MD(dftcomm: DFTCommMod,
 
         ##INIT-MD
         #region: Initializing the Molecular Dynamics simulations
-        mass_si=mass_all*MASS_SI
+        #mass_si=mass_all*MASS_SI
         ##First we assign velocities to the atoms
         #print("the rank of the processor is", comm.rank, "out of the total processors", comm.size)
         vel=np.zeros((tot_num, 3))
@@ -163,31 +162,32 @@ def NVE_MD(dftcomm: DFTCommMod,
         ##Calculate the momentum
         #print("velocities at the time of initialization for processor after dividing", comm.rank, vel)
         #print(flush=True)
-        momentum=mass_si*vel.T
+        momentum=mass_all*vel.T
 
         ##Subtract the momentum of the center of mass from the momentum of the atoms
         momentum_T=momentum.T
         momentum_T-=np.mean(momentum, axis=1)
         ##Calculate the new velocity after subtracting the momentum of the center of mass
         
-        vel=momentum_T.T/mass_si
-        print("shapw of vel is", vel.shape)
+        vel=momentum_T.T/mass_all
+        #print("vel", vel)
+        #print("shapw of vel is", vel.shape)
 
         ##Calculate the kinetic energy
-        ke=0.5*np.sum(mass_si*(vel)**2)
+        ke=0.5*np.sum(mass_all*(vel)**2)
         del momentum, momentum_T
         ##Calculate the temperature
-        T=2*ke/(3*tot_num*BOLTZMANN_SI)
+        T=2*ke/(3*tot_num*BOLTZMANN_RYD)
+       # print("BOLTZMANN_RYD", BOLTZMANN_RYD)
         if dftcomm.image_comm.rank==0: print("the temperature calculated from the random velocities is", T, "K")
-
         ##Rescale the velocities to the desired temperature
         vel*=np.sqrt(T_init/T)
-
+        ke_scale=0.5*np.sum(mass_all*(vel)**2)
+        T_scale=2*ke_scale/(3*tot_num*BOLTZMANN_RYD)
+        if dftcomm.image_comm.rank==0: print("the temperature after rescaling is", T_scale, "K")
         ##Convert the velocities to atomic units
-        vel/=vel_HART
         if dftcomm.image_comm.rank==0: print("re-scaled velocities in atomic units at the time of initializatiion for processor", dftcomm.image_comm.rank, "\n", vel)
-
-        ##Calculate the previous coordinates
+       ##Calculate the previous coordinates
         coords_cart_prev=coords_cart_all-vel.T*dt
         #print("coords cart prev", coords_cart_prev)
         del vel
@@ -272,6 +272,7 @@ def NVE_MD(dftcomm: DFTCommMod,
                                     vloc=v_loc,
                                     nloc_dij_vkb=nloc,
                                     gamma_only=False,
+                                    remove_torque=False,
                                     verbosity=True)[0]
 
                 del l_wfn_kgrp, v_loc, nloc, xc_compute, crystal_itr, FieldG_rho_itr
@@ -288,12 +289,15 @@ def NVE_MD(dftcomm: DFTCommMod,
         while time<max_t:
             ## Starting of the Iterartion
             en, force_coord, rho_itr=compute_en_force(dftcomm, coords_cart_all, rho_md)
+            print("en", en)
+            ##The energy in Hartree units
+            en/=RYDBERG
             if dftcomm.image_comm.rank==0: print("this is iteration", time/dt, "and the force is", force_coord)
             del rho_md
             rho_md=rho_itr
             del rho_itr
             ##Energy and force are calculated in Rydberg units, convert these to Hartree units
-            force_coord*=RYDBERG
+            force_coord
 
             ## Calculating accelaration
             accelaration=force_coord.T/mass_all
@@ -315,9 +319,9 @@ def NVE_MD(dftcomm: DFTCommMod,
             #ke_new=0.5*np.sum(np.sum(momentum_new**2, axis=1)/mass_all)
             ke_new=0.5*np.sum(mass_all*(vel_new.T)**2)
             ##New Temperature
-            T_new=2*ke_new/(3*tot_num*BOLTZMANN_HART)
+            T_new=2*ke_new/(3*tot_num*BOLTZMANN_RYD)
 
-            del vel_new, accelaration, force_coord
+            del accelaration, force_coord
 
             ##Total Energy
             en_total=en+ke_new
@@ -326,15 +330,15 @@ def NVE_MD(dftcomm: DFTCommMod,
             time_array[time_step]=time
             temperature_array[time_step]=T_new
 
+            Ryd_to_eV=27.211386245988/2
 
-            Har_to_eV=27.211386245988
             energy_array[time_step]=en_total
             
 
             if dftcomm.image_comm.rank==0:
-                print("The total energy of the system is", en_total*Har_to_eV, "eV")
-                print("The kinetic energy of the system is", ke_new*Har_to_eV, "eV")
-                print("The potential energy of the system is", en*Har_to_eV, "eV")
+                print("The total energy of the system is", en_total*Ryd_to_eV, "eV")
+                print("The kinetic energy of the system is", ke_new*Ryd_to_eV, "eV")
+                print("The potential energy of the system is", en*Ryd_to_eV, "eV")
                 print("The temperature of the system is", T_new, "K")
                 print("The new coordinates are", coords_cart_all/reallat.alat)
 

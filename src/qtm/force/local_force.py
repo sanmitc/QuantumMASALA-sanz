@@ -39,7 +39,7 @@ def force_local(dftcomm: DFTCommMod,
     omega=gspc.reallat_cellvol
     v_loc=np.zeros((tot_num, numg))
     for isp in range(num_typ):
-        v_loc[labels==isp]=vloc[isp].data
+        v_loc[labels==isp]=np.real(vloc[isp].data)
     v_loc=v_loc[:,idxsort]
     fact=2 if gamma_only else 1
     l_force=np.zeros((tot_num, 3))
@@ -49,8 +49,9 @@ def force_local(dftcomm: DFTCommMod,
         l_force=l_force[0]
     if dftcomm.pwgrp_intra!=None: 
         l_force=dftcomm.pwgrp_intra.allreduce(l_force)
-    force_local=cryst.symm.symmetrize_vec(l_force)
-    force_local-=np.mean(force_local, axis=0)
-    del v_loc, vrho, l_force, rho, labels, coords_cart_all, cryst, gspc, vloc, dftcomm
+    #force_local=cryst.symm.symmetrize_vec(l_force)
+    #force_local-=np.mean(force_local, axis=0)
+
+    del v_loc, vrho, rho, labels, coords_cart_all, cryst, gspc, vloc, dftcomm
     gc.collect()
-    return force_local
+    return l_force

@@ -1,6 +1,13 @@
 import numpy as np
 import re
 import matplotlib.pyplot as plt
+import argparse
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Extract energy and temperature data from a file')
+parser.add_argument('file_path', type=str, help='Path to the file')
+args = parser.parse_args()
+file_path = args.file_path
 
 # Initialize an empty list to store the energies
 energies = []

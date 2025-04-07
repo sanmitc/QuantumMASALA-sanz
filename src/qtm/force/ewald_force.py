@@ -204,8 +204,8 @@ def force_ewald(
             del r, r_norm, vec_num, dtau0
     Force = F_S + F_L
     Force=Force.T
-    Force = crystal.symm.symmetrize_vec(Force)
-    Force-=np.mean(Force, axis=0)
+    #Force = crystal.symm.symmetrize_vec(Force)
+    #Force-=np.mean(Force, axis=0)
     del trans, F_S, F_L, gspc, crystal, reallat, l_atoms, valence_all, coords_cart_all, dftcomm
     gc.collect()
     return Force

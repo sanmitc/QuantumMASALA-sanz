@@ -69,21 +69,21 @@ parser.add_argument("supercell_size", help="Side length of the supercell", type=
 args = parser.parse_args()
 supercell_size = args.supercell_size
 
-alat=10.2
+alat=10.2612
 # Lattice
 reallat = RealLattice.from_alat(
-    alat, a1=[-0.5, 0.0, 0.5], a2=[0.0, 0.5, 0.5], a3=[-0.5, 0.5, 0.0]  # Bohr
+    alat, a1=[1, 0, 0], a2=[0, 1, 0], a3=[0, 0, 1]  # Bohr
 )
 
 # Atom Basis
 si_oncv = UPFv2Data.from_file("Si_ONCV_PBE-1.2.upf")
 
-si_atoms = BasisAtoms(
+si_atoms = BasisAtoms.from_alat(
     "si",
     si_oncv,
     28.086,
     reallat,
-    np.array([[0.875, 0.875, 0.875], [0.125, 0.125, 0.125]]).T,
+    np.array([[0,0,0],[0.5, 0.5, 0],[0, 0.5, 0.5],[0.5, 0, 0.5], [0.25, 0.25, 0.25], [0.25, 0.75, 0.75], [0.75, 0.25, 0.75], [0.75, 0.75, 0.25]]),
 )
 
 crystal_unit = Crystal(reallat, [si_atoms]) 
@@ -157,7 +157,7 @@ mpgrid_shift = (False, False, False)
 kpts = gen_monkhorst_pack_grid(crystal, mpgrid_shape, mpgrid_shift)
 
 # -----Setting up G-Space of calculation-----
-ecut_wfn = 7 * RYDBERG
+ecut_wfn = 20 * RYDBERG
 ecut_rho = 4 *ecut_wfn
 grho_serial = GSpace(crystal.recilat, ecut_rho)
 
@@ -183,8 +183,8 @@ diago_thr_init = 1E-4 * RYDBERG
 
 ##Smearing
 
-steps=2000
-dt=40
+steps=100
+dt=20
 mixing_beta=0.3
 max_t=steps*dt
 T_init=300

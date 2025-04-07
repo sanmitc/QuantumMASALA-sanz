@@ -187,8 +187,8 @@ diago_thr_init = 1E-4 * RYDBERG
 
 ##Smearing
 
-steps=200
-dt=40
+steps=1000
+dt=30
 mixing_beta=0.3
 max_t=steps*dt
 T_init=300

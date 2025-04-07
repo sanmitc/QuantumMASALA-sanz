@@ -80,8 +80,8 @@ def force_nonloc(dftcomm:DFTCommMod,
     force_nl/=RYDBERG_HART
     force_nl=dftcomm.image_comm.allreduce(force_nl)
     force_nl/=dftcomm.image_comm.size
-    force_nl=crystal.symm.symmetrize_vec(force_nl)
-    force_nl-=np.mean(force_nl, axis=0)
+    #force_nl=crystal.symm.symmetrize_vec(force_nl)
+    #force_nl-=np.mean(force_nl, axis=0)
     del nloc_dij_vkb, wavefun, crystal, dftcomm
     gc.collect()
     return force_nl
