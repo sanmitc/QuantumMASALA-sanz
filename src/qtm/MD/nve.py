@@ -137,13 +137,14 @@ def NVE_MD(dftcomm: DFTCommMod,
         label_cryst=np.array([sp.label for sp in l_atoms])
         mass_cryst=np.array([sp.mass for sp in l_atoms])*M_NUC_RYD
         mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms])*M_NUC_RYD
-        print(mass_all)
+        #print(mass_all)
         #tot_mass=np.sum(mass_all)
         num_typ = len(l_atoms)
         reallat=crystal.reallat
         #lnum_labels = np.repeat([np.arange(num_typ)], [sp.numatoms for sp in l_atoms])
         #coords_alat_all = np.concatenate([sp.r_alat for sp in l_atoms], axis=1)
         coords_cart_all = np.concatenate([sp.r_cart for sp in l_atoms], axis =1).T
+        coords_ref=coords_cart_all/reallat.alat
         ##This is a numatom times 3 array containing the coordinates of all the atoms in the crystal
         #endregion: Extract the crystal properties
 
@@ -179,12 +180,12 @@ def NVE_MD(dftcomm: DFTCommMod,
         ##Calculate the temperature
         T=2*ke/(3*tot_num*BOLTZMANN_RYD)
        # print("BOLTZMANN_RYD", BOLTZMANN_RYD)
-        if dftcomm.image_comm.rank==0: print("the temperature calculated from the random velocities is", T, "K")
+        #if dftcomm.image_comm.rank==0: print("the temperature calculated from the random velocities is", T, "K")
         ##Rescale the velocities to the desired temperature
         vel*=np.sqrt(T_init/T)
         ke_scale=0.5*np.sum(mass_all*(vel)**2)
         T_scale=2*ke_scale/(3*tot_num*BOLTZMANN_RYD)
-        if dftcomm.image_comm.rank==0: print("the temperature after rescaling is", T_scale, "K")
+        #if dftcomm.image_comm.rank==0: print("the temperature after rescaling is", T_scale, "K")
         ##Convert the velocities to atomic units
         if dftcomm.image_comm.rank==0: print("re-scaled velocities in atomic units at the time of initializatiion for processor", dftcomm.image_comm.rank, "\n", vel)
        ##Calculate the previous coordinates
@@ -196,6 +197,7 @@ def NVE_MD(dftcomm: DFTCommMod,
         time_array = np.empty(time_step)
         energy_array = np.empty(time_step)
         temperature_array = np.empty(time_step)
+        msd_array= np.empty(time_step)
 
         #endregion: Initializing the Molecular Dynamics simulations
 
@@ -258,9 +260,9 @@ def NVE_MD(dftcomm: DFTCommMod,
                         )
                 
                 scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute = out
-                if comm.rank==0:  
+                '''if comm.rank==0:  
                     print("my rank is", dftcomm.image_comm.rank)
-                    print("And I have successfully calculated energy", en.total)
+                    print("And I have successfully calculated energy", en.total)'''
                 #region of calculation of the jacobian i.e the force
 
                 force_itr= force(dftcomm=dftcomm,
@@ -289,7 +291,7 @@ def NVE_MD(dftcomm: DFTCommMod,
         while time<max_t:
             ## Starting of the Iterartion
             en, force_coord, rho_itr=compute_en_force(dftcomm, coords_cart_all, rho_md)
-            print("en", en)
+            #print("en", en)
             ##The energy in Hartree units
             en/=RYDBERG
             if dftcomm.image_comm.rank==0: print("this is iteration", time/dt, "and the force is", force_coord)
@@ -307,13 +309,16 @@ def NVE_MD(dftcomm: DFTCommMod,
             d_COM=np.sum(mass_all*d_coord.T, axis=1)/np.sum(mass_all)
             coords_new-=d_COM.T
 
-            del d_coord, d_COM
+            
 
             if dftcomm.image_comm.rank==0:
                 print("change in coordinates in each iteration", coords_new-coords_cart_all)
 
             ##New velocity
             vel_new=(coords_new-coords_cart_prev)/(2*dt)
+
+            if dftcomm.image_comm.rank==0:
+                print("the new velocity at this iteration is", vel_new)
             
             ##New Kinetic Energy
             #ke_new=0.5*np.sum(np.sum(momentum_new**2, axis=1)/mass_all)
@@ -333,6 +338,11 @@ def NVE_MD(dftcomm: DFTCommMod,
             Ryd_to_eV=27.211386245988/2
 
             energy_array[time_step]=en_total
+            d_coord_ref=coords_new/reallat.alat-coords_ref
+            msd_array[time_step]=np.sum(d_coord**2)/tot_num 
+
+
+            del d_coord, d_COM
             
 
             if dftcomm.image_comm.rank==0:
@@ -355,16 +365,13 @@ def NVE_MD(dftcomm: DFTCommMod,
             print(flush=True)
             gc.collect()
             time+=dt
-
-        time_array=np.array(time_array)
-        temperature_array=np.array(temperature_array)
-        energy_array=np.array(energy_array)
         
         comm.Bcast(time_array)
         comm.Bcast(temperature_array)
         comm.Bcast(energy_array)
         comm.Bcast(coords_cart_all)
+        comm.Bcast(msd_array)
         
-    return coords_cart_all, time_array, temperature_array , energy_array
+    return coords_cart_all, time_array, temperature_array , energy_array, msd_array, vel_new
 
     

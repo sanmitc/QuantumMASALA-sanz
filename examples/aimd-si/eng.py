@@ -13,7 +13,7 @@ file_path = args.file_path
 energies = []
 
 # Open the file and read line by line
-with open('06_md.out', 'r') as file:
+with open(file_path, 'r') as file:
     for line in file:
         # Use regular expression to find energy values in both scientific notation and normal decimal numbers
         match = re.search(r'total energy of the system is ([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?) eV', line)
@@ -22,13 +22,13 @@ with open('06_md.out', 'r') as file:
             energies.append(float(match.group(1)))
 
 # Convert the list to a NumPy array
-energy_array = np.array(energies)+5710.52280037202
+energy_array = np.array(energies)
 
 # Initialize an empty list to store the temperatures
 temperatures = []
 
 # Open the file and read line by line
-with open('06_md.out', 'r') as file:
+with open(file_path, 'r') as file:
     for line in file:
         # Use regular expression to find temperature values in both scientific notation and normal decimal numbers
         match = re.search(r'The temperature of the system is ([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?) K', line)
@@ -42,7 +42,7 @@ temperature_array = np.array(temperatures)
 kin_energy=[]
 
 # Open the file and read line by line
-with open('06_md.out', 'r') as file:
+with open(file_path, 'r') as file:
     for line in file:
         # Use regular expression to find temperature values in both scientific notation and normal decimal numbers
         match = re.search(r'kinetic energy of the system is ([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?) eV', line)
@@ -56,7 +56,7 @@ ke_array = np.array(kin_energy)
 pot_energy=[]
 
 # Open the file and read line by line
-with open('06_md.out', 'r') as file:
+with open(file_path, 'r') as file:
     for line in file:
         # Use regular expression to find temperature values in both scientific notation and normal decimal numbers
         match = re.search(r'potential energy of the system is ([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?) eV', line)
@@ -65,7 +65,16 @@ with open('06_md.out', 'r') as file:
             pot_energy.append(float(match.group(1)))
 
 # Convert the list to a NumPy array
-pot_array = np.array(pot_energy)+5710.52280037202
+pot_array = np.array(pot_energy)
+
+#intial totoal energy
+E_tot=pot_array[0]+ke_array[0]
+#renormalize energy to 0
+energy_array=energy_array-E_tot
+#renormalize kinetic energy to 0
+#ke_array=ke_array-E_tot
+#renormalize potential energy to 0
+pot_array=pot_array-E_tot
 
 
 length=min(len(energy_array), len(ke_array), len(pot_array))
@@ -74,7 +83,7 @@ ke_array=ke_array[:length]
 pot_array=pot_array[:length]
 time_step=np.arange(0,length,1)  
 au=0.0241888426
-step=40*au
+step=20*au
 time_fs=time_step*step
 
 print(time_fs)
@@ -88,7 +97,7 @@ plt.xlabel('Time(fs)')
 plt.ylabel('Quantities(eV)')
 plt.title('energy vs Time')
 plt.legend()
-plt.savefig('energy_vs_time.png')
+plt.savefig(f'energy_vs_time_{file_path}.png')
 
 
 ##Plot only total energy 
@@ -98,6 +107,6 @@ plt.xlabel('Time(fs)')
 plt.ylabel('Quantities(eV)')
 plt.title('energy vs Time')
 plt.legend()
-plt.savefig('total_energy_vs_time.png')
+plt.savefig(f'total_energy_vs_time_{file_path}.png')
 
 
