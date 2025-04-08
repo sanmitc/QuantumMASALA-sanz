@@ -36,7 +36,7 @@ from qtm.gspace import GSpace
 from qtm.mpi import QTMComm
 from qtm.dft import DFTCommMod, scf
 from qtm.force import force, force_ewald, force_local, force_nonloc
-from qtm.MD import NVE_MD
+from qtm.MD import NVE_MD, RDist
 
 from qtm.io_utils.dft_printers import print_scf_status
 
@@ -91,8 +91,13 @@ crystal_supercell=crystal_unit.gen_supercell([supercell_size] * 3)
 ##print the crystal coordinates of the supercell
 #print("The crystal coordinates of the supercell", crystal_supercell.l_atoms[0].r_alat)
 r_alat_supercell=crystal_supercell.l_atoms[0].r_alat.T
+r_cart_supercell=crystal_supercell.l_atoms[0].r_cart.T
 
-if dftcomm.image_comm.rank==0: print("the original coordinates are\n", r_alat_supercell, "\n")
+
+if dftcomm.image_comm.rank==0: 
+    print("the original coordinates are\n", r_alat_supercell, "\n")
+    print("the original coordinates in cartesian are\n", r_cart_supercell, "\n")
+
 ##relaxed coordinates
 '''data=[[-0.25360773, -0.09576083, -0.50259631, -0.22927595, -0.67175465,
         -0.31229879, -0.32129343, -0.05276206, -0.3994334 , -0.19186968,
@@ -157,7 +162,7 @@ mpgrid_shift = (False, False, False)
 kpts = gen_monkhorst_pack_grid(crystal, mpgrid_shape, mpgrid_shift)
 
 # -----Setting up G-Space of calculation-----
-ecut_wfn = 20 * RYDBERG
+ecut_wfn = 10 * RYDBERG
 ecut_rho = 4 *ecut_wfn
 grho_serial = GSpace(crystal.recilat, ecut_rho)
 
@@ -183,7 +188,7 @@ diago_thr_init = 1E-4 * RYDBERG
 
 ##Smearing
 
-steps=100
+steps=1000
 dt=20
 mixing_beta=0.3
 max_t=steps*dt
@@ -209,6 +214,19 @@ if dftcomm.image_comm.rank==0:
     print("\ninitialtemp=", T_init)
     print(flush=True)
 
+rmax=np.array([0.5, 0.5, 0.5])
+r, g_r=RDist(crystal, r_cart_supercell, rmax, 1000)
+plt.figure()
+plt.plot(r, g_r)
+plt.xlabel('Distance (Bohr)')
+plt.ylabel('g(r)')
+plt.title('Radial Distribution Function')
+plt.legend(f"each time step represents {dt} atomic units")
+plt.savefig('RDF_initial.png')
+# -----Running SCF calculation-----
+
+
+
 from time import perf_counter
 
 initial_time=perf_counter()
@@ -220,7 +238,18 @@ out = NVE_MD(dftcomm, crystal, max_t, dt, T_init, kpts, grho, gwfn, ecut_wfn,
           conv_thr=conv_thr, diago_thr_init=diago_thr_init,
           iter_printer=print_scf_status)
 
-coords, time, temperature, energy= out
+coords, time, temperature, energy, msd, vel= out
+
+r, g_r=RDist(crystal, coords, rmax, 1000)
+plt.figure()
+plt.plot(r, g_r)
+plt.xlabel('Distance (Bohr)')
+plt.ylabel('g(r)')
+plt.title('Radial Distribution Function')
+plt.legend(f"each time step represents {dt} atomic units")
+plt.savefig('RDF_final.png')
+# -----Running SCF calculation-----
+
 
 final_time=perf_counter()
 print("The time taken is", final_time-initial_time)
@@ -244,11 +273,29 @@ plt.title('Total Energy vs Time')
 plt.legend(f"each time step represents {dt} atomic units")
 plt.savefig('Energy_vs_Time_big.png')
 
+##Plotting the MSD
+plt.figure()
+plt.plot(time, msd)
+plt.xlabel('Time')
+plt.ylabel('MSD')
+plt.title('Mean Square Displacement vs Time')
+plt.legend(f"each time step represents {dt} atomic units")
+plt.savefig('MSD_vs_Time_big.png')
+
 
 ##Saving as txt files
 np.savetxt("time_big.txt", time)
 np.savetxt("temperature_big.txt", temperature)
 np.savetxt("energy_big.txt", energy)
+tot_atom=coords.shape[1]
+np.savetxt("msd_big.txt", msd)
+with open("final_output.txt", "w") as f:
+    f.write("Final coordinates:\n")
+    for i in range(tot_atom):
+         f.write(f"Atom {i+1}: {coords[:, i]}\n")
+    f.write("Final velocities:\n")
+    for i in range(tot_atom):
+        f.write(f"Atom {i+1}: {vel[:, i]}\n")
 
 print("SCF Routine has exited")
 print(qtmlogger)
