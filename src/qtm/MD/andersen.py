@@ -3,7 +3,7 @@ import gc
 
 import numpy as numpy
 
-from qtm.constants import RYDBERG, ELECTRONVOLT, vel_HART, BOLTZMANN_SI, BOLTZMANN_HART, M_NUC_HART, MASS_SI
+from qtm.constants import RYDBERG, ELECTRONVOLT, vel_HART, BOLTZMANN_SI, BOLTZMANN_RYD, M_NUC_RYD
 from qtm.lattice import RealLattice
 from qtm.crystal import BasisAtoms, Crystal
 from qtm.pseudo import UPFv2Data
@@ -88,9 +88,18 @@ if version_info[1] >= 8:
                      en: EnergyData) -> None:
             ...
 
-    class WfnInit(Protocol):
+    class WfnInit:
+        def __init__(self, pre_existing_wfns: list[KSWfn]):
+            self.pre_existing_wfns = pre_existing_wfns
+
         def __call__(self, ik: int, kswfn: list[KSWfn]) -> None:
-            ...
+            """Initialize wavefunctions using pre-existing wavefunctions.
+            For now it only works for spin unpolarised case"""
+            assert len(kswfn) == len(self.pre_existing_wfns[ik])
+            for i in range(len(kswfn)):
+                kswfn[i].evc_gk.data[:] = self.pre_existing_wfns[ik][i].evc_gk.data
+                kswfn[i].evl[:]= self.pre_existing_wfns[ik][i].evl[:]
+                kswfn[i].occ[:]= self.pre_existing_wfns[ik][i].occ[:]  
 else:
     IterPrinter = 'IterPrinter'
     WfnInit = 'WfnInit'
@@ -103,6 +112,7 @@ def Andersen_MD(dftcomm: DFTCommMod,
           max_t: float,
           dt: float,
           T_init: float,
+          vel_init: None | np.ndarray,
           nu: float,
           kpts:KList,
           grho: GSpace,
@@ -134,58 +144,61 @@ def Andersen_MD(dftcomm: DFTCommMod,
         num_in_types=np.array([sp.numatoms for sp in l_atoms])
         ppdat_cryst=np.array([sp.ppdata for sp in l_atoms])
         label_cryst=np.array([sp.label for sp in l_atoms])
-        mass_cryst=np.array([sp.mass for sp in l_atoms])*M_NUC_HART
-        mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms])*M_NUC_HART
+        mass_cryst=np.array([sp.mass for sp in l_atoms])*M_NUC_RYD
+        mass_all=np.repeat([sp.mass for sp in l_atoms], [sp.numatoms for sp in l_atoms])*M_NUC_RYD
         #tot_mass=np.sum(mass_all)
         num_typ = len(l_atoms)
         reallat=crystal.reallat
         #lnum_labels = np.repeat([np.arange(num_typ)], [sp.numatoms for sp in l_atoms])
         #coords_alat_all = np.concatenate([sp.r_alat for sp in l_atoms], axis=1)
         coords_cart_all = np.concatenate([sp.r_cart for sp in l_atoms], axis =1).T
+        coods_ref=coords_cart_all
         ##This is a numatom times 3 array containing the coordinates of all the atoms in the crystal
 
 
         ##INIT-MD
-        mass_si=mass_all*MASS_SI
         ##First we assign velocities to the atoms
-        vel=np.random.rand(tot_num, 3)-0.5
-        vel=comm.allreduce(vel)
-        vel/=comm.size
-        ##Calculate the momentum
-        momentum=mass_si*vel.T
-        momentum_T=np.array(momentum).T
+        if type(vel_init) is None:
+            vel=np.random.rand(tot_num, 3)-0.5
+            vel=comm.allreduce(vel)
+            vel/=comm.size
+            ##Calculate the momentum
+            momentum=mass_all*vel.T
+            momentum_T=np.array(momentum).T
 
-        ##Compute the momentum of the center of mass
-        momentum_T-=np.mean(momentum_T, axis=0)
+            ##Compute the momentum of the center of mass
+            momentum_T-=np.mean(momentum_T, axis=0)
 
 
-        ##Calculate the updated velocity of the atoms
-        vel=momentum_T.T/mass_si
-        vel=vel.T
+            ##Calculate the updated velocity of the atoms
+            vel=momentum_T.T/mass_all
+            vel=vel.T
 
-        ##Calculate the kinetic energy
-        ke_init=0.5*np.sum(mass_si*vel.T**2)
-        del momentum, momentum_T
-        ##Calculate the temperature
-        T=2*ke_init/(3*tot_num*BOLTZMANN_SI)
+            ##Calculate the kinetic energy
+            ke_init=0.5*np.sum(mass_all*vel.T**2)
+            del momentum, momentum_T
+            ##Calculate the temperature
+            T=2*ke_init/(3*tot_num*BOLTZMANN_RYD)
 
-        print("Initially the temperature from the random velocities are", T, "K")  
+            print("Initially the temperature from the random velocities are", T, "K")  
 
-        ##Rescale the velocities to the desired temperature
-        vel*=np.sqrt(T_init/T)
+            ##Rescale the velocities
+            # to the desired temperature
+            vel*=np.sqrt(T_init/T)
+        else:
+            vel= vel_init
 
         #region Debug statement
         ##Calculate the kinetic energy
-        ke_init=0.5*np.sum(mass_si*vel.T**2)
+        ke_init=0.5*np.sum(mass_all*vel.T**2)
 
         ##Calculate the temperature
-        T_later=2*ke_init/(3*tot_num*BOLTZMANN_SI)
+        T_later=2*ke_init/(3*tot_num*BOLTZMANN_RYD)
 
         print("After rescaling the temperature is", T_later, "K")
         #endregion End of debug statement
 
         ##Convert the velocities to atomic units
-        vel/=vel_HART
 
         time_step=int(max_t/dt)
         time_array = np.empty(time_step)
@@ -193,9 +206,10 @@ def Andersen_MD(dftcomm: DFTCommMod,
         ke_array=np.empty(time_step)
         pe_array=np.empty(time_step)
         temperature_array = np.empty(time_step)
+        msd_array = np.empty(time_step)
 
         ##This computes the forces on the molecules
-        def compute_en_force(dftcomm, coords_all, rho: FieldGType):
+        def compute_en_force(dftcomm, coords_all, rho: FieldGType, wfn:list[KSWfn]| None=None):
             nonlocal libxc_func, gamma_only, ecut_wfn, e_temp, conv_thr, maxiter, diago_thr_init, iter_printer, mix_beta, mix_dim, ret_vxc
             l_atoms_itr=[]
             num_counter=0
@@ -236,7 +250,7 @@ def Andersen_MD(dftcomm: DFTCommMod,
                         is_noncolin=is_noncolin, 
                         symm_rho=symm_rho, 
                         rho_start=rho_itr, 
-                        wfn_init=wfn_init, 
+                        wfn_init=wfn, 
                         libxc_func=libxc_func, 
                         occ_typ=occ_typ, 
                         smear_typ=smear_typ, 
@@ -252,7 +266,7 @@ def Andersen_MD(dftcomm: DFTCommMod,
                         force_stress=True
                         )
                 
-                scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute = out
+                scf_converged, rho, l_wfn_kgrp, en, v_loc, nloc, xc_compute, del_vhxc = out
                 if comm.rank==0:  
                     print("my rank is", dftcomm.image_comm.rank)
                     print("And I have successfully calculated energy", en.total)
@@ -266,22 +280,25 @@ def Andersen_MD(dftcomm: DFTCommMod,
                                     rho=rho,
                                     vloc=v_loc,
                                     nloc_dij_vkb=nloc,
+                                    del_v_hxc=del_vhxc,
                                     gamma_only=False,
                                     verbosity=True)[0]
 
-                del l_wfn_kgrp, v_loc, nloc, xc_compute, crystal_itr, FieldG_rho_itr
+                del v_loc, nloc, xc_compute, crystal_itr, FieldG_rho_itr
                 for var in list(locals().keys()):
                     if var not in ["en", "force_itr", "rho"]:
                         del locals()[var]
                 gc.collect()  
                 #if dftcomm.image_comm.rank==0:
                     #print("I am process", comm.rank, "and I have calculated the force", force_itr)
-            return en.total, force_itr, rho
+                energy=en.total/RYDBERG
+            return energy, force_itr, rho, l_wfn_kgrp
         
         #Initial configuration of the system
-        en, force_coord, rho=compute_en_force(dftcomm, coords_cart_all, rho_start)
-        force_coord*=RYDBERG
+        en, force_coord, rho, wfn_in=compute_en_force(dftcomm, coords_cart_all, rho_start, wfn=wfn_init)
+        force_coord
         rho_md=rho
+        wfn_md=WfnInit(wfn_in)
         time=0
         while time<max_t:
             ## Starting of the Iterartion
@@ -295,18 +312,15 @@ def Andersen_MD(dftcomm: DFTCommMod,
 
             del d_coord, d_COM
 
-
+            d_coord_ref=coords_new-coods_ref
+            msd=np.sum(d_coord_ref**2)
             ##Calculating the new energy and forces
-            en_new, force_coord_new, rho=compute_en_force(dftcomm, coords_new, rho_md)
+            en_new, force_coord_new, rho, wfn=compute_en_force(dftcomm, coords_new, rho_md, wfn_md)
             rho_md=rho
-            force_coord_new*=RYDBERG
+            wfn_md=WfnInit(wfn)
             ##Calculating the new velocity
             #region debug statement
-            if comm.rank==0:
-                print("the force calculated at this position is", force_coord_new)
-                print("the extra accelaration coming from this force is", force_coord_new.T/mass_all)
-                print("the addition to velocity is ", 0.5*(accelaration+force_coord_new.T/mass_all)*dt)
-                print("velocity before this addition is", vel)
+            
             #endregion end of debug statement
             vel=vel+0.5*(accelaration+force_coord_new.T/mass_all).T*dt
 
@@ -315,7 +329,7 @@ def Andersen_MD(dftcomm: DFTCommMod,
             coords_cart_all=coords_new
 
             ###Application of the Andersen Thermostat
-            kT=T_init*BOLTZMANN_SI
+            kT=T_init*BOLTZMANN_RYD
 
             if comm.rank==0: print("velocity before random scaling", vel)
 
@@ -323,7 +337,7 @@ def Andersen_MD(dftcomm: DFTCommMod,
             #Calculating the total energy and Temperature
             ke=0.5*np.sum(mass_all*vel.T**2)
             en_total=en_new+ke
-            T_new=2*ke/(3*tot_num*BOLTZMANN_HART)
+            T_new=2*ke/(3*tot_num*BOLTZMANN_RYD)
 
             del accelaration, coords_new, force_coord_new
 
@@ -347,27 +361,27 @@ def Andersen_MD(dftcomm: DFTCommMod,
                     b=np.random.rand()
                     print("the random number is", b)
                     if b <prob:
-                        sigma=np.sqrt(kT/mass_si[atom])
+                        sigma=np.sqrt(kT/mass_all[atom])
                         vel[atom]=np.random.normal(0, sigma, 3) ##This is in SI units
-                        vel[atom]/=vel_HART
                 print("velocity after random scaling", vel)
             comm.Bcast(vel)
             print("the velocity after the random scaling is", vel)
 
             ##Make the center of Mass stationary
-            momentum=mass_si*vel.T
+            momentum=mass_all*vel.T
             momentum_T=np.array(momentum).T
             ##Compute the momentum of the center of mass
             momentum_T-=np.mean(momentum_T, axis=0)
             ##Calculate the updated velocity of the atoms
-            vel=momentum_T.T/mass_si
+            vel=momentum_T.T/mass_all
             vel=vel.T
             ##Calculate the kinetic energy
+
 
             #Calculating the total energy and Temperature
             ke=0.5*np.sum(mass_all*vel.T**2)
             en_total=en_new+ke
-            T_new=2*ke/(3*tot_num*BOLTZMANN_HART)
+            T_new=2*ke/(3*tot_num*BOLTZMANN_RYD)
 
             ##printing all the variables
             #region debug statement
@@ -379,12 +393,21 @@ def Andersen_MD(dftcomm: DFTCommMod,
             #endregion end of debug statement
 
             time_step=int(time/dt)
-            Har_to_ev=27.211386245988
+            Ryd_to_eV=27.211386245988/2
             time_array[time_step]=time
-            energy_array[time_step]=en_total*Har_to_ev
-            ke_array[time_step]=ke*Har_to_ev
-            pe_array[time_step]=en_new*Har_to_ev
+            energy_array[time_step]=en_total*Ryd_to_eV
+            ke_array[time_step]=ke*Ryd_to_eV
+            pe_array[time_step]=en_new*Ryd_to_eV
             temperature_array[time_step]=T_new
+            msd_array[time_step]=msd
+
+            if dftcomm.image_comm.rank==0:
+                print("The total energy of the system is", en_total*Ryd_to_eV, "eV")
+                print("The kinetic energy of the system is", ke*Ryd_to_eV, "eV")
+                print("The potential energy of the system is", en*Ryd_to_eV, "eV")
+                print("The temperature of the system is", T_new, "K")
+                print("The new coordinates are", coords_cart_all/reallat.alat)
+                print("The new MSD is", msd_array[time_step])
 
             time+=dt
 
@@ -393,12 +416,13 @@ def Andersen_MD(dftcomm: DFTCommMod,
         energy_array=np.array(energy_array)
         ke_array=np.array(ke_array)
         pe_array=np.array(pe_array)
+        msd_array=np.array(msd_array)
 
         comm.Bcast(time_array)
         comm.Bcast(temperature_array)
         comm.Bcast(energy_array)
         comm.Bcast(coords_cart_all)
 
-    return coords_cart_all, time_array, temperature_array , energy_array, ke_array, pe_array
+    return coords_cart_all, time_array, temperature_array , energy_array, ke_array, pe_array, msd_array, vel
 
     
