@@ -27,11 +27,12 @@ def force_scf(del_vhxc: FieldGType,
     cart_g = (grho.g_cart[:,idxsort])
     omega=grho.reallat_cellvol
     alat=cryst.reallat.alat
-
-    struct_fact=np.exp(1j *coords_cart_all.T @ cart_g)
+    if cart_g.ndim==3:
+        cart_g=cart_g.reshape(cart_g.shape[0],cart_g.shape[-1])
+    struct_fact=np.exp(-1j *coords_cart_all.T @ cart_g)
     
     ###Constructing the rho corresponding to the atomic superposition.
-    rho_atom=np.zeros((num_typ, numg))
+    rho_atom=np.zeros((num_typ, numg), dtype=np.complex128)
     for isp in range(num_typ):
         rho_atom[isp]=loc_generate_rhoatomic(l_atoms[isp], grho).data
     rho_atom=rho_atom[:,idxsort]/np.prod(grho.grid_shape)
@@ -39,8 +40,14 @@ def force_scf(del_vhxc: FieldGType,
     force_scf=np.zeros((tot_num, 3))
     for atom in range(tot_num):
         label=labels[atom]
-        quant=del_vhxc * struct_fact[atom] * rho_atom[label]
+        quant=np.conj(del_vhxc) * struct_fact[atom] * rho_atom[label]
+
         force_scf[atom]=np.real((1j*np.sum(cart_g*quant, axis=1)))
+
+    '''print("rho atom", rho_atom)
+    print("del_vhxc", del_vhxc.data)
+    print("struct_fact", struct_fact)
+    print("force_scf", force_scf)'''
 
     if cart_g.ndim==3:
         force_scf=force_scf[0]
@@ -49,4 +56,4 @@ def force_scf(del_vhxc: FieldGType,
         force_scf=dftcomm.pwgrp_intra.allreduce(force_scf)
 
 
-    return force_scf*omega
+    return force_scf

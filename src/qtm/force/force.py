@@ -5,7 +5,7 @@ from qtm.crystal import Crystal
 from qtm.gspace import GSpace
 from qtm.containers.field import FieldGType
 from qtm.config import NDArray
-from qtm.force import force_ewald, force_nonloc, force_local
+from qtm.force import force_ewald, force_nonloc, force_local, force_scf
 from qtm.dft import DFTCommMod 
 
 ## Addition of Ewald, Non-Local and Local forces
@@ -18,6 +18,7 @@ def force(dftcomm: DFTCommMod,
         rho: FieldGType,
         vloc:list,
         nloc_dij_vkb:list,
+        del_v_hxc: FieldGType,
         gamma_only:bool=False,
         remove_torque:bool=False,
         verbosity:bool=False) -> NDArray:
@@ -57,8 +58,18 @@ def force(dftcomm: DFTCommMod,
             print("Ewald forces are", ewald_force)
             print("Local forces are", local_force)
             print("Non-Local forces are", nonlocal_force)
+
+
+    scf_force=force_scf(del_vhxc=del_v_hxc,
+                        dftcomm=dftcomm,
+                        cryst=crystal,
+                        grho=gspc)
+    if comm.rank==0 and verbosity:
+        print("SCF forces are", scf_force)
+    ##Add the forces
+    ##Total forc
     
-    force_total=np.array(ewald_force+local_force+nonlocal_force)
+    force_total=np.array(ewald_force+local_force+nonlocal_force+scf_force)
 
     ##Make total force zero
     force_total=crystal.symm.symmetrize_vec(force_total)
