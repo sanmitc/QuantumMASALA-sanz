@@ -585,7 +585,7 @@ def scf(
             #print("normalized rho_in, at iteration", idxiter, flush=True)
             compute_vloc()
             #print("computed vloc, at iteration", idxiter, flush=True)
-
+            v_in_hxc=v_hxc(rho_in)
             vloc_g0 = np.sum(vloc, axis=-1) / np.prod(grho.grid_shape)
             #print("computed vloc_g0, at iteration", idxiter, flush=True)
 
@@ -614,6 +614,9 @@ def scf(
             #print("updated rho_out, at iteration", idxiter, flush=True)
             compute_en()
             #print("computed energy, at iteration", idxiter, flush=True)
+            v_out_hxc = v_hxc(rho_out)
+
+            del_v_hxc=v_out_hxc - v_in_hxc
             e_error = float(mixmod.compute_error(rho_in, rho_out))
             #print("computed error, at iteration", idxiter, flush=True)
             e_error = image_comm.bcast(e_error)
@@ -700,7 +703,7 @@ def scf(
                 if var not in ["scf_converged", "rho_in", "l_kswfn_kgrp", "en", "nloc_dij_vkb"]:
                     del locals()[var]
             gc.collect()
-            return scf_converged, rho_in, l_kswfn_kgrp, en, v_ion_list, nloc_dij_vkb, xc_compute, 
+            return scf_converged, rho_in, l_kswfn_kgrp, en, v_ion_list, nloc_dij_vkb, xc_compute, del_v_hxc
         else:
             for var in list(locals().keys()):
                 if var not in ["scf_converged", "rho_in", "l_kswfn_kgrp", "en"]:
